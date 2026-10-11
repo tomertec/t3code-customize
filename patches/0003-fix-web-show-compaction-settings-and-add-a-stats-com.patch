@@ -14,10 +14,10 @@ Subject: [PATCH 3/3] fix(web): show compaction settings and add a stats
  6 files changed, 317 insertions(+), 26 deletions(-)
 
 diff --git a/apps/web/src/components/ChatView.tsx b/apps/web/src/components/ChatView.tsx
-index eab1ebfe5..bff0cecd7 100644
+index f1cb8665e..fc086c9db 100644
 --- a/apps/web/src/components/ChatView.tsx
 +++ b/apps/web/src/components/ChatView.tsx
-@@ -3641,23 +3641,49 @@ export default function ChatView(props: ChatViewProps) {
+@@ -3639,23 +3639,49 @@ export default function ChatView(props: ChatViewProps) {
      const usageLimits = activeUsageLimits
        ? { limits: activeUsageLimits, providerName: activeProviderName }
        : null;
@@ -72,7 +72,7 @@ index eab1ebfe5..bff0cecd7 100644
    const pendingBackgroundTasks = useMemo(() => {
      if (serverProjection === null || serverProjection === undefined) {
        return [];
-@@ -11921,7 +11947,23 @@ export default function ChatView(props: ChatViewProps) {
+@@ -11923,7 +11949,23 @@ export default function ChatView(props: ChatViewProps) {
                      </ComposerSurface.Shell>
                      {/* Opaque so timeline content scrolling under the overlay can't show through the stats line. */}
                      <div className={composerStats !== null ? "bg-background" : undefined}>

@@ -1580,10 +1580,10 @@ index 0108bbb66..51f891d1a 100644
  });
  export type ServerProviderUsageWindow = typeof ServerProviderUsageWindow.Type;
 diff --git a/packages/provider-core/src/server/managedProvider.test.ts b/packages/provider-core/src/server/managedProvider.test.ts
-index 1d73e112b..1d339fc2b 100644
+index cbca7e42a..8683ebf6e 100644
 --- a/packages/provider-core/src/server/managedProvider.test.ts
 +++ b/packages/provider-core/src/server/managedProvider.test.ts
-@@ -558,12 +558,19 @@ describe("makeManagedServerProvider", () => {
+@@ -583,12 +583,19 @@ describe("makeManagedServerProvider", () => {
          assert.deepStrictEqual(update?.usageLimits, {
            checkedAt: "2026-04-10T00:05:00.000Z",
            windows: [
@@ -1604,7 +1604,7 @@ index 1d73e112b..1d339fc2b 100644
                resetsAt: "2026-04-17T00:00:00.000Z",
              },
            ],
-@@ -641,12 +648,16 @@ describe("makeManagedServerProvider", () => {
+@@ -666,12 +673,16 @@ describe("makeManagedServerProvider", () => {
            Effect.map((chunk) => Array.from(chunk)[0]!),
          );
          assert.deepStrictEqual(enriched.models, enrichedSnapshot.models);
@@ -1623,7 +1623,7 @@ index 1d73e112b..1d339fc2b 100644
          // ...and the workspace they were read for.
          assert.strictEqual(refreshed.auth.workspaceId, "ws-a");
  
-@@ -658,3 +669,186 @@ describe("makeManagedServerProvider", () => {
+@@ -683,3 +694,186 @@ describe("makeManagedServerProvider", () => {
      ).pipe(Effect.provide(layerAlwaysRunTest)),
    );
  });
@@ -1811,7 +1811,7 @@ index 1d73e112b..1d339fc2b 100644
 +  ).pipe(Effect.provide(layerAlwaysRunTest)),
 +);
 diff --git a/packages/provider-core/src/server/managedProvider.ts b/packages/provider-core/src/server/managedProvider.ts
-index a11734a16..e76f7d4b0 100644
+index bac7fbd3a..0d9b71e17 100644
 --- a/packages/provider-core/src/server/managedProvider.ts
 +++ b/packages/provider-core/src/server/managedProvider.ts
 @@ -4,7 +4,9 @@ import {
@@ -1853,7 +1853,7 @@ index a11734a16..e76f7d4b0 100644
    readonly enrichSnapshot?: (input: {
      readonly settings: Settings;
      readonly snapshot: ServerProvider;
-@@ -206,13 +216,33 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
+@@ -208,13 +218,33 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
            update,
            checkedAt: update.checkedAt,
          });
@@ -1890,7 +1890,7 @@ index a11734a16..e76f7d4b0 100644
        });
        if (snapshotToPublish !== null) {
          yield* PubSub.publish(changesPubSub, snapshotToPublish);
-@@ -234,6 +264,40 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
+@@ -236,6 +266,40 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
      return genericDemand || instanceDemand;
    });
  

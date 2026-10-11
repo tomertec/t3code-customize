@@ -6,7 +6,7 @@ Subject: [PATCH 1/3] Stats for Nerds: response throughput and the composer
 
 ---
  .../Adapters/ClaudeAdapterV2.test.ts          | 200 +++++++
- .../Adapters/ClaudeAdapterV2.ts               |  30 +
+ .../Adapters/ClaudeAdapterV2.ts               |  38 +-
  .../Adapters/ClaudeResponseThroughput.test.ts | 230 ++++++++
  .../Adapters/ClaudeResponseThroughput.ts      | 155 +++++
  .../Adapters/CodexAdapterV2.test.ts           | 222 +++++++
@@ -26,7 +26,7 @@ Subject: [PATCH 1/3] Stats for Nerds: response throughput and the composer
  .../contracts/src/orchestrationV2.test.ts     |  71 +++
  packages/contracts/src/orchestrationV2.ts     |  10 +
  packages/contracts/src/settings.ts            |   2 +
- 21 files changed, 2753 insertions(+), 47 deletions(-)
+ 21 files changed, 2757 insertions(+), 51 deletions(-)
  create mode 100644 apps/server/src/orchestration-v2/Adapters/ClaudeResponseThroughput.test.ts
  create mode 100644 apps/server/src/orchestration-v2/Adapters/ClaudeResponseThroughput.ts
  create mode 100644 apps/server/src/orchestration-v2/Adapters/CodexResponseThroughput.test.ts
@@ -36,18 +36,18 @@ Subject: [PATCH 1/3] Stats for Nerds: response throughput and the composer
  create mode 100644 apps/web/src/components/chat/ComposerStats.tsx
 
 diff --git a/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts b/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts
-index d80e76072..8a371a9d9 100644
+index 7652b5636..9852dd7b6 100644
 --- a/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts
 +++ b/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts
-@@ -2,6 +2,7 @@
- import * as NodeEvents from "node:events";
+@@ -4,6 +4,7 @@ import * as NodeFS from "node:fs";
  import * as NodeOS from "node:os";
+ import * as NodePath from "node:path";
  import * as NodeStream from "node:stream";
 +import { observeClaudeFrame } from "./ClaudeResponseThroughput.ts";
  
  import type {
    Query as ClaudeQuery,
-@@ -2661,6 +2662,205 @@ describe("ClaudeAdapterV2 background wake turns", () => {
+@@ -2683,6 +2684,205 @@ describe("ClaudeAdapterV2 background wake turns", () => {
        ),
    );
  
@@ -254,7 +254,7 @@ index d80e76072..8a371a9d9 100644
      "projects Claude thinking blocks when %s",
      (status) =>
 diff --git a/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts b/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts
-index da344c202..f798b2561 100644
+index 80eb47436..ffd5b76c1 100644
 --- a/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts
 +++ b/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts
 @@ -1,3 +1,5 @@
@@ -263,7 +263,7 @@ index da344c202..f798b2561 100644
  import { makeProviderTextDeltaCoalescer } from "./ProviderTextDeltaCoalescer.ts";
  import {
    dynamicToolTitle,
-@@ -751,6 +753,10 @@ export const layerQueryRunner: Layer.Layer<
+@@ -775,6 +777,10 @@ export const layerQueryRunner: Layer.Layer<
            messages: Stream.fromAsyncIterable(claudeQueryMessages(queryRuntime), (cause) =>
              queryRunnerError(cause, "fromAsyncIterable"),
            ).pipe(
@@ -274,7 +274,7 @@ index da344c202..f798b2561 100644
              Stream.tap((message) =>
                logProtocolEvent({
                  direction: "incoming",
-@@ -2846,6 +2852,7 @@ function formatClaudeUsageLimitWait(waitMs: number): string {
+@@ -2884,6 +2890,7 @@ function formatClaudeUsageLimitWait(waitMs: number): string {
  }
  
  interface ActiveClaudeTurnContext {
@@ -282,7 +282,7 @@ index da344c202..f798b2561 100644
    readonly input: ProviderAdapter.ProviderAdapterV2TurnInput;
    readonly nativeThreadId: string;
    readonly nativeTurnId: string;
-@@ -4073,6 +4080,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+@@ -4142,6 +4149,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
              return ordinal;
            });
  
@@ -291,7 +291,7 @@ index da344c202..f798b2561 100644
          const providerTurnPayload = (input: {
            readonly context: ActiveClaudeTurnContext;
            readonly status: OrchestrationV2ProviderTurn["status"];
-@@ -4091,6 +4100,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+@@ -4160,6 +4169,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
            status: input.status,
            startedAt: input.context.startedAt,
            completedAt: input.completedAt,
@@ -301,7 +301,7 @@ index da344c202..f798b2561 100644
          });
  
          const buildToolCallArtifacts = (input: {
-@@ -5413,6 +5425,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+@@ -5847,6 +5859,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                    failure: null,
                    threadDisposition,
                  };
@@ -309,7 +309,7 @@ index da344c202..f798b2561 100644
            yield* Effect.all(
              [
                emitProviderEvent({
-@@ -6152,6 +6165,20 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+@@ -6696,6 +6709,20 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
            }
            yield* trackClaudeGoal({ nativeThreadId: liveQuery.nativeThreadId, context, message });
  
@@ -330,16 +330,31 @@ index da344c202..f798b2561 100644
            // Subagent narration belongs to its child thread, never the parent log.
            if (message.type === "stream_event" && !message.parent_tool_use_id) {
              const event = message.event;
-@@ -7739,6 +7766,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+@@ -8327,8 +8354,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+           };
            yield* Ref.set(queryContext, context);
            yield* querySession.messages.pipe(
-             Stream.runForEach((message) => {
+-            Stream.runForEach((message) =>
+-              sdkMessageLock.withPermits(1)(
++            Stream.runForEach((message) => {
 +              // Test/custom runners also stamp at ingress; held replays keep the first stamp.
 +              observeClaudeFrame(message, undefined, querySession);
-               if (
-                 message.type === "system" &&
-                 (message.subtype === "init" || message.subtype === "status") &&
-@@ -7829,6 +7858,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
++              return sdkMessageLock.withPermits(1)(
+                 Effect.suspend(() => {
+                   if (
+                     message.type === "system" &&
+@@ -8339,8 +8368,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+                   }
+                   return handleSdkMessage({ query: querySession, message });
+                 }),
+-              ),
+-            ),
++              );
++            }),
+             Effect.exit,
+             Effect.flatMap(
+               Effect.fnUntraced(function* (exit: ClaudeQueryStreamExit) {
+@@ -8423,6 +8452,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                goalsByNativeThread.set(nativeThreadId, turnInput.providerThread.goal ?? null);
              }
              const context: ActiveClaudeTurnContext = {
@@ -1006,7 +1021,7 @@ index 9a1c8f6c9..5aa1f23e6 100644
      Effect.scoped(
        Effect.gen(function* () {
 diff --git a/apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts b/apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts
-index 398337b22..9b6453536 100644
+index 38e64af02..f8933540b 100644
 --- a/apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts
 +++ b/apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts
 @@ -1,3 +1,4 @@
@@ -1704,10 +1719,10 @@ index 000000000..1df8c4443
 +  }
 +}
 diff --git a/apps/server/src/orchestration-v2/ProjectionStore.test.ts b/apps/server/src/orchestration-v2/ProjectionStore.test.ts
-index 1008c4a2f..6e83a7a80 100644
+index bda7b896e..4ebbf378a 100644
 --- a/apps/server/src/orchestration-v2/ProjectionStore.test.ts
 +++ b/apps/server/src/orchestration-v2/ProjectionStore.test.ts
-@@ -568,6 +568,13 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
+@@ -621,6 +621,13 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
          outputTokens: 1_000,
          updatedAt: "2026-08-29T12:00:00.000Z",
        } as const;
@@ -1721,7 +1736,7 @@ index 1008c4a2f..6e83a7a80 100644
        const replacementUsage = {
          usedTokens: 18_000,
          maxTokens: 200_000,
-@@ -624,10 +631,10 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
+@@ -677,10 +684,10 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
          nodeId,
          driver,
          occurredAt: now,
@@ -1734,7 +1749,7 @@ index 1008c4a2f..6e83a7a80 100644
          type: "provider-turn.updated",
          threadId,
          nodeId,
-@@ -635,9 +642,28 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
+@@ -688,9 +695,28 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
          occurredAt: now,
          payload: { ...providerTurn, status: "completed", completedAt: now },
        });
@@ -1764,7 +1779,7 @@ index 1008c4a2f..6e83a7a80 100644
        assert.strictEqual(reloaded.providerTurns[0]?.status, "completed");
  
        yield* projectionStore.apply({
-@@ -652,11 +678,16 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
+@@ -705,11 +731,16 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
            status: "completed",
            completedAt: now,
            tokenUsage: replacementUsage,
@@ -1782,7 +1797,7 @@ index 1008c4a2f..6e83a7a80 100644
    );
  
 diff --git a/apps/server/src/orchestration-v2/ProjectionStore.ts b/apps/server/src/orchestration-v2/ProjectionStore.ts
-index a374cc55a..f518c70f1 100644
+index 4f10a0512..8621c74bc 100644
 --- a/apps/server/src/orchestration-v2/ProjectionStore.ts
 +++ b/apps/server/src/orchestration-v2/ProjectionStore.ts
 @@ -638,6 +638,9 @@ export function upsertProviderTurn(
@@ -1806,7 +1821,7 @@ index a374cc55a..f518c70f1 100644
                      SELECT payload_json
                      FROM orchestration_v2_projection_provider_turns
 diff --git a/apps/web/src/components/ChatView.tsx b/apps/web/src/components/ChatView.tsx
-index 87d1303e0..eab1ebfe5 100644
+index 84f5b476a..f1cb8665e 100644
 --- a/apps/web/src/components/ChatView.tsx
 +++ b/apps/web/src/components/ChatView.tsx
 @@ -491,6 +491,8 @@ import { useLinkedThreadPullRequest } from "./ThreadStatusIndicators";
@@ -1818,7 +1833,7 @@ index 87d1303e0..eab1ebfe5 100644
  import { ComposerSurface } from "./chat/ComposerSurface";
  import { resolveThreadSyncPhase } from "../threadSync";
  import {
-@@ -3631,6 +3633,31 @@ export default function ChatView(props: ChatViewProps) {
+@@ -3629,6 +3631,31 @@ export default function ChatView(props: ChatViewProps) {
        ),
      [activeThreadLiveTokenUsage, serverVisibleTurnItems, serverProjection],
    );
@@ -1850,7 +1865,7 @@ index 87d1303e0..eab1ebfe5 100644
    const pendingBackgroundTasks = useMemo(() => {
      if (serverProjection === null || serverProjection === undefined) {
        return [];
-@@ -11892,10 +11919,14 @@ export default function ChatView(props: ChatViewProps) {
+@@ -11894,10 +11921,14 @@ export default function ChatView(props: ChatViewProps) {
                          </div>
                        </div>
                      </ComposerSurface.Shell>
@@ -3118,7 +3133,7 @@ index 000000000..025f57253
 +  );
 +}
 diff --git a/apps/web/src/components/settings/SettingsPanels.tsx b/apps/web/src/components/settings/SettingsPanels.tsx
-index 13c525a3d..729c992bc 100644
+index db1c7749e..ae1e709aa 100644
 --- a/apps/web/src/components/settings/SettingsPanels.tsx
 +++ b/apps/web/src/components/settings/SettingsPanels.tsx
 @@ -620,6 +620,9 @@ export function useSettingsRestore(onRestored?: () => void) {
@@ -3181,10 +3196,10 @@ index 13c525a3d..729c992bc 100644
            {...searchableSetting("send-shortcut")}
            description="Choose when Enter sends a prompt or inserts a new line"
 diff --git a/apps/web/src/components/settings/settingsSearch.ts b/apps/web/src/components/settings/settingsSearch.ts
-index ccb2d2a24..0f5f1fb7e 100644
+index 798aabeb8..7302e5263 100644
 --- a/apps/web/src/components/settings/settingsSearch.ts
 +++ b/apps/web/src/components/settings/settingsSearch.ts
-@@ -451,6 +451,12 @@ export const SETTINGS_SEARCH_ITEMS = [
+@@ -453,6 +453,12 @@ export const SETTINGS_SEARCH_ITEMS = [
      to: "/settings/general",
      searchTerms: ["composer rest resting scroll wheel conversation timeline shrink minimize"],
    },
@@ -3271,7 +3286,7 @@ index 4587221c0..7b95672dd 100644
        return { ...base, runtimeRequests: upsertEntity(base.runtimeRequests, event.payload) };
      case "message.updated":
 diff --git a/packages/contracts/src/orchestrationV2.test.ts b/packages/contracts/src/orchestrationV2.test.ts
-index cd185f908..569f0815d 100644
+index bca9ff656..7f8e33e6f 100644
 --- a/packages/contracts/src/orchestrationV2.test.ts
 +++ b/packages/contracts/src/orchestrationV2.test.ts
 @@ -17,6 +17,7 @@ import {
@@ -3290,7 +3305,7 @@ index cd185f908..569f0815d 100644
    OrchestrationV2RpcSchemas,
    OrchestrationV2ShellSnapshot,
    OrchestrationV2SubscribeThreadInput,
-@@ -1504,3 +1506,72 @@ describe("latestProviderTurnForAttempt", () => {
+@@ -1568,3 +1570,72 @@ describe("latestProviderTurnForAttempt", () => {
      expect(latestProviderTurnForAttempt(turns, null)).toBeUndefined();
    });
  });
@@ -3364,10 +3379,10 @@ index cd185f908..569f0815d 100644
 +  });
 +});
 diff --git a/packages/contracts/src/orchestrationV2.ts b/packages/contracts/src/orchestrationV2.ts
-index 842f0576f..bd0b06046 100644
+index 482249376..ce164b024 100644
 --- a/packages/contracts/src/orchestrationV2.ts
 +++ b/packages/contracts/src/orchestrationV2.ts
-@@ -1007,6 +1007,16 @@ export const OrchestrationV2ProviderTurn = Schema.Struct({
+@@ -1089,6 +1089,16 @@ export const OrchestrationV2ProviderTurn = Schema.Struct({
    completedAt: Schema.NullOr(Schema.DateTimeUtc),
    tokenUsage: Schema.optional(OrchestrationV2ProviderTurnTokenUsage),
    turnTokenUsage: Schema.optional(TurnTokenUsage),
@@ -3385,10 +3400,10 @@ index 842f0576f..bd0b06046 100644
  export type OrchestrationV2ProviderTurn = typeof OrchestrationV2ProviderTurn.Type;
  
 diff --git a/packages/contracts/src/settings.ts b/packages/contracts/src/settings.ts
-index a8f3a74eb..148f836b3 100644
+index e32572942..d9bfbde28 100644
 --- a/packages/contracts/src/settings.ts
 +++ b/packages/contracts/src/settings.ts
-@@ -449,6 +449,7 @@ export const ClientSettingsSchema = Schema.Struct({
+@@ -448,6 +448,7 @@ export const ClientSettingsSchema = Schema.Struct({
    // Legacy context window meter. The composer hides it by default; users who
    // still want the old usage indicator can restore it from Settings.
    contextWindowMeterEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
@@ -3396,7 +3411,7 @@ index a8f3a74eb..148f836b3 100644
    // Desktop resting composer: scrolling an existing thread's conversation
    // settles the composer into its single-line layout. Losing focus never does.
    composerCollapseOnScroll: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
-@@ -1632,6 +1633,7 @@ export const ClientSettingsPatch = Schema.Struct({
+@@ -1636,6 +1637,7 @@ export const ClientSettingsPatch = Schema.Struct({
    ),
    planModeEnabled: Schema.optionalKey(Schema.Boolean),
    contextWindowMeterEnabled: Schema.optionalKey(Schema.Boolean),
