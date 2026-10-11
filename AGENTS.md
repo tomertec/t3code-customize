@@ -8,8 +8,8 @@ is to carry them onto the user's nightly with every feature still working.
 
 ## Start
 
-1. Run `./t3code-customize build` from this repo. It finds the installed AppImage,
-   reads the exact upstream commit it was built from, and applies the patches to
+1. On Linux run `./t3code-customize build`; on macOS run `./t3code-customize build --build-only` from this repo. It finds the installed AppImage,
+   or macOS .app, reads the exact upstream commit it was built from, and applies the patches to
    that commit in the source checkout at `~/.cache/t3code-customize/t3code`.
 2. If it reports a conflict, a rebase is stopped in that checkout. If it reports a
    failing test or typecheck, the commits are in place and the checks failed.
@@ -44,3 +44,7 @@ left it, builds, installs the result and writes the ported commits back to
 
 End with a short report: what changed upstream, what you changed and in which files,
 and whether the final build succeeded.
+
+## macOS installer maintenance
+
+The shared build logic lives in `t3code-customize`; bundle signing, verified stock backups and app replacement live in `macos.py`. Run `python3 -m unittest discover -s tests -v` after changing either. Use `--build-only` for packaging validation while the user's app is open. Never terminate user app processes, weaken signing/backup checks, restore an older app over a newer Nightly, or delete backups while a customized app remains installed. User data is outside the installer's scope. The main executable is ad-hoc signed; nested native binaries retain their shipped signatures.

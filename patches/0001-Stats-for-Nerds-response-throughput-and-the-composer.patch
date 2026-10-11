@@ -36,7 +36,7 @@ Subject: [PATCH 1/3] Stats for Nerds: response throughput and the composer
  create mode 100644 apps/web/src/components/chat/ComposerStats.tsx
 
 diff --git a/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts b/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts
-index 95a6b453c..24bb45ee3 100644
+index d80e76072..8a371a9d9 100644
 --- a/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts
 +++ b/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts
 @@ -2,6 +2,7 @@
@@ -47,7 +47,7 @@ index 95a6b453c..24bb45ee3 100644
  
  import type {
    Query as ClaudeQuery,
-@@ -2592,6 +2593,205 @@ describe("ClaudeAdapterV2 background wake turns", () => {
+@@ -2661,6 +2662,205 @@ describe("ClaudeAdapterV2 background wake turns", () => {
        ),
    );
  
@@ -254,7 +254,7 @@ index 95a6b453c..24bb45ee3 100644
      "projects Claude thinking blocks when %s",
      (status) =>
 diff --git a/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts b/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts
-index aadf28a61..b176a4221 100644
+index da344c202..f798b2561 100644
 --- a/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts
 +++ b/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts
 @@ -1,3 +1,5 @@
@@ -263,7 +263,7 @@ index aadf28a61..b176a4221 100644
  import { makeProviderTextDeltaCoalescer } from "./ProviderTextDeltaCoalescer.ts";
  import {
    dynamicToolTitle,
-@@ -731,6 +733,10 @@ export const layerQueryRunner: Layer.Layer<
+@@ -751,6 +753,10 @@ export const layerQueryRunner: Layer.Layer<
            messages: Stream.fromAsyncIterable(claudeQueryMessages(queryRuntime), (cause) =>
              queryRunnerError(cause, "fromAsyncIterable"),
            ).pipe(
@@ -274,7 +274,7 @@ index aadf28a61..b176a4221 100644
              Stream.tap((message) =>
                logProtocolEvent({
                  direction: "incoming",
-@@ -2826,6 +2832,7 @@ function formatClaudeUsageLimitWait(waitMs: number): string {
+@@ -2846,6 +2852,7 @@ function formatClaudeUsageLimitWait(waitMs: number): string {
  }
  
  interface ActiveClaudeTurnContext {
@@ -282,7 +282,7 @@ index aadf28a61..b176a4221 100644
    readonly input: ProviderAdapter.ProviderAdapterV2TurnInput;
    readonly nativeThreadId: string;
    readonly nativeTurnId: string;
-@@ -3970,6 +3977,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+@@ -4073,6 +4080,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
              return ordinal;
            });
  
@@ -291,7 +291,7 @@ index aadf28a61..b176a4221 100644
          const providerTurnPayload = (input: {
            readonly context: ActiveClaudeTurnContext;
            readonly status: OrchestrationV2ProviderTurn["status"];
-@@ -3988,6 +3997,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+@@ -4091,6 +4100,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
            status: input.status,
            startedAt: input.context.startedAt,
            completedAt: input.completedAt,
@@ -301,7 +301,7 @@ index aadf28a61..b176a4221 100644
          });
  
          const buildToolCallArtifacts = (input: {
-@@ -5310,6 +5322,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+@@ -5413,6 +5425,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                    failure: null,
                    threadDisposition,
                  };
@@ -309,7 +309,7 @@ index aadf28a61..b176a4221 100644
            yield* Effect.all(
              [
                emitProviderEvent({
-@@ -6049,6 +6062,20 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+@@ -6152,6 +6165,20 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
            }
            yield* trackClaudeGoal({ nativeThreadId: liveQuery.nativeThreadId, context, message });
  
@@ -330,7 +330,7 @@ index aadf28a61..b176a4221 100644
            // Subagent narration belongs to its child thread, never the parent log.
            if (message.type === "stream_event" && !message.parent_tool_use_id) {
              const event = message.event;
-@@ -7613,6 +7640,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+@@ -7739,6 +7766,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
            yield* Ref.set(queryContext, context);
            yield* querySession.messages.pipe(
              Stream.runForEach((message) => {
@@ -339,7 +339,7 @@ index aadf28a61..b176a4221 100644
                if (
                  message.type === "system" &&
                  (message.subtype === "init" || message.subtype === "status") &&
-@@ -7703,6 +7732,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+@@ -7829,6 +7858,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                goalsByNativeThread.set(nativeThreadId, turnInput.providerThread.goal ?? null);
              }
              const context: ActiveClaudeTurnContext = {
@@ -1806,10 +1806,10 @@ index a374cc55a..f518c70f1 100644
                      SELECT payload_json
                      FROM orchestration_v2_projection_provider_turns
 diff --git a/apps/web/src/components/ChatView.tsx b/apps/web/src/components/ChatView.tsx
-index d2ec0af4e..968531736 100644
+index 87d1303e0..eab1ebfe5 100644
 --- a/apps/web/src/components/ChatView.tsx
 +++ b/apps/web/src/components/ChatView.tsx
-@@ -490,6 +490,8 @@ import { useLinkedThreadPullRequest } from "./ThreadStatusIndicators";
+@@ -491,6 +491,8 @@ import { useLinkedThreadPullRequest } from "./ThreadStatusIndicators";
  import type { ComposerBannerStackItem } from "./chat/ComposerBannerStack";
  import { ThreadStatusLine } from "./chat/ThreadStatusLine";
  import { formatRelativeTimeLabel, formatRelativeTimeUntilLabel } from "../timestampFormat";
@@ -1818,7 +1818,7 @@ index d2ec0af4e..968531736 100644
  import { ComposerSurface } from "./chat/ComposerSurface";
  import { resolveThreadSyncPhase } from "../threadSync";
  import {
-@@ -3632,6 +3634,31 @@ export default function ChatView(props: ChatViewProps) {
+@@ -3631,6 +3633,31 @@ export default function ChatView(props: ChatViewProps) {
        ),
      [activeThreadLiveTokenUsage, serverVisibleTurnItems, serverProjection],
    );
@@ -1850,7 +1850,7 @@ index d2ec0af4e..968531736 100644
    const pendingBackgroundTasks = useMemo(() => {
      if (serverProjection === null || serverProjection === undefined) {
        return [];
-@@ -11870,10 +11897,14 @@ export default function ChatView(props: ChatViewProps) {
+@@ -11892,10 +11919,14 @@ export default function ChatView(props: ChatViewProps) {
                          </div>
                        </div>
                      </ComposerSurface.Shell>
@@ -3364,10 +3364,10 @@ index cd185f908..569f0815d 100644
 +  });
 +});
 diff --git a/packages/contracts/src/orchestrationV2.ts b/packages/contracts/src/orchestrationV2.ts
-index 865077ef9..34976bd63 100644
+index 842f0576f..bd0b06046 100644
 --- a/packages/contracts/src/orchestrationV2.ts
 +++ b/packages/contracts/src/orchestrationV2.ts
-@@ -1004,6 +1004,16 @@ export const OrchestrationV2ProviderTurn = Schema.Struct({
+@@ -1007,6 +1007,16 @@ export const OrchestrationV2ProviderTurn = Schema.Struct({
    completedAt: Schema.NullOr(Schema.DateTimeUtc),
    tokenUsage: Schema.optional(OrchestrationV2ProviderTurnTokenUsage),
    turnTokenUsage: Schema.optional(TurnTokenUsage),

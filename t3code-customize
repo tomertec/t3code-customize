@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Rebuild your installed T3 Code Nightly AppImage with a stats bar under the composer.
+"""Add a stats bar to your installed T3 Code Nightly (macOS or Linux).
 
 Run it after every T3 Code update. Everything happens on this machine: the
 patches in this repo are applied to the exact upstream commit your AppImage was
 built from, the web, server and desktop bundles are rebuilt, and the result is
-laid over a copy of your app. Your AppImage and your T3 data are never modified.
+laid over your app on macOS (with a full stock backup), or a copy on Linux.
+T3 user data is never modified by the installer.
 """
 import argparse
 import copy
@@ -21,6 +22,7 @@ import sys
 import tarfile
 import time
 import urllib.request
+import macos
 
 NAME = 't3code-customize'
 REPO = Path(__file__).resolve().parent
@@ -117,7 +119,7 @@ def patches():
 
 def recipe_hash():
     digest = hashlib.sha256()
-    for path in patches() + [REPO / 'patches/base.txt', REPO / 'checks.json']:
+    for path in patches() + [REPO / 'patches/base.txt', REPO / 'checks.json', REPO / NAME, REPO / 'macos.py']:
         digest.update(path.name.encode() + path.read_bytes())
     return digest.hexdigest()[:12]
 
@@ -308,28 +310,34 @@ def node_major(node):
         return 0
 
 
+def node_target():
+    arch = {'x86_64': 'x64', 'aarch64': 'arm64', 'arm64': 'arm64'}.get(os.uname().machine)
+    platform = {'darwin': 'darwin', 'linux': 'linux'}.get(sys.platform)
+    if not arch or not platform:
+        raise Stop('Node 24 or newer is required on a supported macOS or Linux architecture.')
+    return platform, arch, '.tar.gz' if platform == 'darwin' else '.tar.xz'
+
+
 def ensure_node(log):
     """Use the system Node if it is new enough, else a private copy from nodejs.org."""
     system = shutil.which('node')
     if system and node_major(system) >= 24:
         return None
-    arch = {'x86_64': 'x64', 'aarch64': 'arm64'}.get(os.uname().machine)
-    if not arch:
-        raise Stop('Node 24 or newer is required. Install it and run again.')
-    private = sorted((CACHE / 'node').glob(f'node-v24.*-linux-{arch}'), key=version_key)
+    platform, arch, suffix = node_target()
+    private = sorted((CACHE / 'node').glob(f'node-v24.*-{platform}-{arch}'), key=version_key)
     if private and node_major(str(private[-1] / 'bin/node')) >= 24:
         return private[-1] / 'bin'
     step('Downloading Node 24 (one time, private to this tool)...')
     with urllib.request.urlopen('https://nodejs.org/dist/index.json', timeout=30) as response:
         releases = json.load(response)
-    version = next(r['version'] for r in releases if r['version'].startswith('v24.') and f'linux-{arch}' in r['files'])
-    name = f'node-{version}-linux-{arch}'
+    version = next(r['version'] for r in releases if r['version'].startswith('v24.') and f'{platform}-{arch}' in r['files'])
+    name = f'node-{version}-{platform}-{arch}'
     base = f'https://nodejs.org/dist/{version}/'
     with urllib.request.urlopen(base + 'SHASUMS256.txt', timeout=30) as response:
         sums = dict(reversed(line.split()) for line in response.read().decode().splitlines() if line.strip())
     folder = CACHE / 'node'
     folder.mkdir(parents=True, exist_ok=True)
-    archive = folder / (name + '.tar.xz')
+    archive = folder / (name + suffix)
     urllib.request.urlretrieve(base + archive.name, archive)
     if sha256(archive) != sums.get(archive.name):
         archive.unlink()
@@ -448,9 +456,10 @@ def build_bundles(env, version, stock_root, config, log):
         brand = 'nightly' if 'nightly' in version else 'production'
         run(['node', 'scripts/apply-web-brand-assets.ts', brand, 'apps/server/dist/client'], cwd=SOURCE, env=env, log=log)
         # Reuse the native helper from your own app instead of compiling it.
-        arch = {'x86_64': 'x64', 'aarch64': 'arm64'}.get(os.uname().machine, 'x64')
+        arch = {'x86_64': 'x64', 'aarch64': 'arm64', 'arm64': 'arm64'}.get(os.uname().machine, 'x64')
         helper = SOURCE / f'native/browser-secret/build/{arch}/t3-browser-secret'
-        stock_helper = stock_root / 'resources/browser-secret/t3-browser-secret'
+        resources = stock_root / ('Contents/Resources' if sys.platform == 'darwin' else 'resources')
+        stock_helper = resources / 'browser-secret/t3-browser-secret'
         if stock_helper.exists():
             helper.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(stock_helper, helper)
@@ -562,6 +571,40 @@ def install_launcher(appimage_dir):
         say(f'Note: {BIN.parent} is not on your PATH. Add it to run {NAME} from anywhere.')
 
 
+def build_for_version(args, version, commit, stock_root, config, log):
+    """Apply, check and rebuild patches for either desktop packaging format."""
+    if not re.fullmatch(r'[0-9a-f]{7,40}', commit):
+        raise Stop('This app does not record its source commit, so it cannot be rebuilt exactly.')
+    env = build_env(ensure_node(log))
+    target = ensure_commit(commit, version, log)
+    step('Applying the patches...')
+    attempts = 2
+    resume = ported = args.resume
+    agent = None
+    while True:
+        try:
+            prepare(target, log, resume=resume)
+            install_dependencies(env, log)
+            if not args.skip_checks:
+                checks(env, log)
+            break
+        except NeedsFix as problem:
+            if older_than_patches(target):
+                raise Stop(stuck_message(problem, target))
+            say(str(problem))
+            agent = agent or choose_agent(args.fix)
+            if not agent or attempts == 0:
+                raise NeedsFix(stuck_message(problem, target))
+            attempts -= 1
+            agent_fix(agent, str(problem), target, version, log)
+            resume = ported = True
+    head = git('rev-parse', 'HEAD').strip()
+    build_bundles(env, version, stock_root, config, log)
+    if git('rev-parse', 'HEAD').strip() != head:
+        raise Stop('The source checkout changed during the build.')
+    return target, ported
+
+
 def cmd_build(args):
     started = time.time()
     if not shutil.which('git'):
@@ -603,34 +646,7 @@ def cmd_build(args):
         say(f'    Nightly {version}, upstream commit {commit[:12]}')
         if len(config) != len(PUBLIC_CONFIG):
             say('    Note: could not read T3 Connect config from your app; sign-in may not work in this build.')
-        node_bin = ensure_node(log)
-        env = build_env(node_bin)
-        target = ensure_commit(commit, version, log)
-        step('Applying the patches...')
-        attempts = 2
-        resume = ported = args.resume
-        agent = None
-        while True:
-            try:
-                prepare(target, log, resume=resume)
-                install_dependencies(env, log)
-                if not args.skip_checks:
-                    checks(env, log)
-                break
-            except NeedsFix as problem:
-                if older_than_patches(target):
-                    raise Stop(stuck_message(problem, target))
-                say(str(problem))
-                agent = agent or choose_agent(args.fix)
-                if not agent or attempts == 0:
-                    raise NeedsFix(stuck_message(problem, target))
-                attempts -= 1
-                agent_fix(agent, str(problem), target, version, log)
-                resume = ported = True
-        head = git('rev-parse', 'HEAD').strip()
-        build_bundles(env, version, stock_root, config, log)
-        if git('rev-parse', 'HEAD').strip() != head:
-            raise Stop('The source checkout changed during the build.')
+        target, ported = build_for_version(args, version, commit, stock_root, config, log)
         step('Assembling and verifying your customized app...')
         output = job / 'app.asar'
         overlay(stock_root / 'resources/app.asar', output, SOURCE, config)
@@ -764,6 +780,8 @@ def main():
 
     def build_options(p):
         p.add_argument('--appimage', help='path to your T3 Code AppImage (remembered)')
+        p.add_argument('--app', help='macOS T3 Code Nightly .app path (remembered)')
+        p.add_argument('--build-only', action='store_true', help='macOS: prepare a verified build without installing it')
         p.add_argument('--fix', choices=sorted(AGENTS), help='if a nightly breaks the patches, let this agent port them without asking')
         p.add_argument('--resume', action='store_true', help='continue from the source checkout as you or your agent left it')
         p.add_argument('--skip-checks', action='store_true', help='skip the patch tests and typechecks')
@@ -771,19 +789,24 @@ def main():
         p.add_argument('--no-pull', action='store_true', help='do not fetch newer patches first')
 
     build_options(sub.add_parser('build', help='update the patches and build (the default)'))
+    build_options(sub.add_parser('install', help='build and install the customization'))
+    build_options(sub.add_parser('reinstall', help='reapply to the installed Nightly after an update'))
     launch = sub.add_parser('launch', help='open the customized build if it matches your T3 Code, else stock')
     launch.add_argument('rest', nargs=argparse.REMAINDER)
-    sub.add_parser('status', help='show what the next launch opens')
-    sub.add_parser('on', help='use the customized build')
-    sub.add_parser('off', help='go back to stock T3 Code')
+    for command, help_text in [('status', 'show customization status'), ('on', 'use the customized build'),
+                               ('off', 'restore stock T3 Code'), ('restore', 'restore stock T3 Code'),
+                               ('uninstall', 'restore stock and remove customization tooling')]:
+        p = sub.add_parser(command, help=help_text)
+        p.add_argument('--app', help='macOS T3 Code Nightly .app path')
     sub.add_parser('verify', help='apply the patches to their base and run the checks (for CI)')
-    sub.add_parser('uninstall', help='remove the launcher, builds and caches')
     argv = sys.argv[1:]
     if not argv or argv[0].startswith('-') and argv[0] not in ('-h', '--help'):
         argv = ['build', *argv]
     args = parser.parse_args(argv)
-    handler = globals()['cmd_' + args.command]
-    if args.command in ('launch', 'status', 'on', 'off'):
+    is_mac = sys.platform == 'darwin' and args.command != 'verify'
+    alias = {'install': 'build', 'reinstall': 'build', 'restore': 'off'}.get(args.command, args.command)
+    handler = (lambda a: macos.dispatch(a, sys.modules[__name__])) if is_mac else globals()['cmd_' + alias]
+    if args.command in ('launch', 'status') or (not is_mac and args.command in ('on', 'off', 'restore')):
         return handler(args)
     CACHE.mkdir(parents=True, exist_ok=True)
     with (CACHE / 'lock').open('w') as lock:
@@ -797,9 +820,9 @@ def main():
 if __name__ == '__main__':
     try:
         main()
-    except Stop as stop:
+    except (Stop, macos.Error, OSError, subprocess.CalledProcessError) as stop:
         print(f'\n{stop}', file=sys.stderr)
         sys.exit(3 if isinstance(stop, NeedsFix) else 1)
     except KeyboardInterrupt:
-        print('\nStopped. Your T3 Code is untouched.', file=sys.stderr)
+        print('\nStopped. Run status before retrying; stock backups and recovery files are retained.', file=sys.stderr)
         sys.exit(130)

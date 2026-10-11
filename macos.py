@@ -9,6 +9,8 @@ import stat
 import struct
 import subprocess
 import sys
+import time
+from types import SimpleNamespace
 import uuid
 
 MARKER = 'T3CodeCustomization'
@@ -288,3 +290,177 @@ def restore(app, data):
         return False
     replace_app(app, stock, data, expected=bundle_digest(app))
     return True
+
+
+def disable_updates(boot):
+    """Set the upstream opt-out at boot, including when opened from Finder."""
+    boot.write_bytes(b'process.env.T3CODE_DISABLE_AUTO_UPDATE = "true";\n' + boot.read_bytes())
+
+
+def local_entitlements(original):
+    # Developer ID, associated domains and keychain groups cannot be granted by
+    # an ad-hoc signature. Preserve only runtime capabilities for Electron/V8.
+    return {key: value for key, value in original.items() if key.startswith('com.apple.security.cs.')}
+
+
+def verify_signature(app, log=None):
+    subprocess.run(['codesign', '--verify', '--deep', '--strict', str(app)],
+                   stdout=log, stderr=log, check=True)
+
+
+def sign_app(app, log):
+    result = subprocess.run(['codesign', '-d', '--entitlements', '-', '--xml', str(app)],
+                            capture_output=True, check=True)
+    original = plistlib.loads(result.stdout) if result.stdout.strip() else {}
+    entitlements = app.parent / 'local-entitlements.plist'
+    entitlements.write_bytes(plistlib.dumps(local_entitlements(original)))
+    try:
+        # Nested shipped binaries keep their original signatures. Only the
+        # outer app's executable and resource seal must be signed again.
+        subprocess.run(['codesign', '--force', '--sign', '-', '--options', 'runtime',
+                        '--entitlements', str(entitlements), str(app)],
+                       stdout=log, stderr=log, check=True)
+    finally:
+        entitlements.unlink(missing_ok=True)
+    # A copied download may have quarantine flags, but this is a locally built
+    # app. Never change extended attributes on the original stock backup.
+    subprocess.run(['xattr', '-dr', 'com.apple.quarantine', str(app)],
+                   stdout=log, stderr=log, check=True)
+    verify_signature(app, log)
+
+
+def app_data(api, app):
+    return api.DATA / 'macos' / hashlib.sha256(str(app).encode()).hexdigest()[:16]
+
+
+def locate(args, api):
+    configured = api.load(api.CONFIG / 'config.json', {}).get('app')
+    explicit = getattr(args, 'app', None) or configured
+    if explicit:
+        path = Path(explicit).expanduser().absolute()
+        # Recover a rename interrupted before the app was put back, before
+        # discovery attempts to read the currently missing bundle.
+        recover_transaction(path, app_data(api, path))
+    app = find_app(explicit=explicit)
+    if getattr(args, 'app', None):
+        api.save(api.CONFIG / 'config.json', {**api.load(api.CONFIG / 'config.json', {}), 'app': str(app)})
+    return app, app_data(api, app)
+
+
+def install_cli(api):
+    api.BIN.parent.mkdir(parents=True, exist_ok=True)
+    if api.BIN.exists() or api.BIN.is_symlink():
+        if not api.BIN.is_symlink() or api.BIN.resolve() != api.REPO / api.NAME:
+            raise Error(f'{api.BIN} already exists and belongs to another installation.')
+    else:
+        api.BIN.symlink_to(api.REPO / api.NAME)
+
+
+def build_and_install(args, api, app, data):
+    if args.skip_checks:
+        raise Error('macOS installation requires the patch tests and typechecks; --skip-checks is not supported.')
+    if not args.no_pull and not args.resume:
+        api.pull_latest()
+    recover_transaction(app, data)
+    observed = bundle_digest(app)
+    stock = resolve_stock(app, data)
+    verify_signature(stock)
+    stock = ensure_backup(stock, data) if stock == app else stock
+    metadata = read_metadata(stock)
+    state = load_json(data / 'state.json', {})
+    recipe = api.recipe_hash()
+    artifact = Path(state.get('artifact', ''))
+    cached = (not args.force and not args.resume and state.get('stockDigest') == bundle_digest(stock)
+              and state.get('recipe') == recipe and artifact.is_dir()
+              and bundle_digest(artifact) == state.get('customDigest'))
+    if not cached:
+        job = data / 'builds' / (metadata['version'] + '-' + uuid.uuid4().hex)
+        job.mkdir(parents=True)
+        artifact = job / app.name
+        logs = api.CACHE / 'logs'
+        logs.mkdir(parents=True, exist_ok=True)
+        log_path = logs / ('macos-' + time.strftime('%Y%m%d-%H%M%S') + '.log')
+        api.say('Log: ' + str(log_path))
+        with log_path.open('w') as log:
+            api.step(f"Building for T3 Code {metadata['version']} ({metadata['commit']})...")
+            copy_app(stock, artifact)
+            resources = artifact / 'Contents/Resources'
+            archive = api.Archive(resources / 'app.asar')
+            try:
+                config = api.read_public_config(archive)
+            finally:
+                archive.close()
+            if len(config) != len(api.PUBLIC_CONFIG):
+                raise Error('Could not read all T3 Connect public config; refusing to install an incomplete build.')
+            target, ported = api.build_for_version(
+                args, metadata['version'], metadata['commit'], artifact, config, log)
+            disable_updates(api.SOURCE / 'apps/desktop/dist-electron/boot.cjs')
+            api.step('Assembling and signing the macOS app...')
+            output = job / 'app.asar'
+            api.overlay(resources / 'app.asar', output, api.SOURCE, config)
+            os.replace(output, resources / 'app.asar')
+            update_integrity(artifact)
+            if ported:
+                api.export_patches(target)
+            recipe = api.recipe_hash()
+            set_marker(artifact, {'stockDigest': bundle_digest(stock), 'recipe': recipe,
+                                  'version': metadata['version'], 'format': 1})
+            sign_app(artifact, log)
+        if bundle_digest(app) != observed:
+            raise Error('Installed app changed while building. Run reinstall for the new version.')
+        record_build(app, data, stock, recipe, artifact=artifact)
+    else:
+        api.say('Using the verified cached build for ' + metadata['version'] + '.')
+        verify_signature(artifact)
+    install_cli(api)
+    if args.build_only:
+        api.say('Verified build is ready: ' + str(artifact))
+        api.say('Quit T3 Code, then run: t3code-customize install')
+        return
+    if bundle_digest(app) == load_json(data / 'state.json')['customDigest']:
+        api.say('Customization is already installed for ' + metadata['version'] + '.')
+        return
+    replace_app(app, artifact, data, expected=observed)
+    api.say('Installed in ' + str(app) + '. Open T3 Code normally.')
+    api.say('Turn on Settings > General > Stats for nerds.')
+    api.say('Before updating Nightly: quit T3 Code, run t3code-customize off, update, then run t3code-customize reinstall.')
+
+
+def dispatch(args, api):
+    app, data = locate(args, api)
+    if args.command in ('build', 'install', 'reinstall', 'on'):
+        if args.command == 'on':
+            args = SimpleNamespace(command='install', app=str(app), no_pull=True, resume=False,
+                                   force=False, skip_checks=False, fix=None, build_only=False)
+        return build_and_install(args, api, app, data)
+    if args.command == 'status':
+        metadata = read_metadata(app)
+        state = load_json(data / 'state.json', {})
+        api.say('Installed T3 Code: ' + str(app))
+        api.say('Version: ' + metadata['version'])
+        if metadata['marker']:
+            stock = resolve_stock(app, data)
+            api.say('Customization: installed (locally signed; auto-update disabled)')
+            api.say('Stock backup: ' + str(stock))
+        else:
+            api.say('Customization: off (stock app)')
+        if state.get('version') == metadata['version']:
+            api.say('Prepared build: ' + state.get('artifact', 'none'))
+        elif state:
+            api.say('Nightly changed. Run t3code-customize reinstall.')
+        return
+    if args.command in ('off', 'restore', 'uninstall'):
+        changed = restore(app, data)
+        api.say('Restored official T3 Code.' if changed else 'T3 Code is already stock; no older backup was applied.')
+        if args.command == 'uninstall':
+            if data.exists():
+                shutil.rmtree(data)
+            remaining = list((api.DATA / 'macos').glob('*/state.json'))
+            if not remaining and api.BIN.is_symlink() and api.BIN.resolve() == api.REPO / api.NAME:
+                api.BIN.unlink()
+            api.say('Removed this app\'s customization, backups and cached builds. Source checkout and build tools are retained.')
+        return
+    if args.command == 'launch':
+        subprocess.run(['open', str(app), '--args', *args.rest], check=True)
+        return
+    raise Error('Unknown macOS command: ' + args.command)
