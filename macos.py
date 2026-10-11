@@ -20,6 +20,25 @@ class Error(RuntimeError):
     """An unsafe or unsuccessful macOS operation."""
 
 
+def sync_directory(path):
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, 'O_DIRECTORY', 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def sync_bundle(app):
+    """Persist copied files before the last recovery copy can be removed."""
+    for base, _, files in os.walk(app, topdown=False, followlinks=False):
+        for name in files:
+            path = Path(base) / name
+            if not path.is_symlink():
+                with path.open('rb') as source:
+                    os.fsync(source.fileno())
+        sync_directory(base)
+
+
 def save_json(path, value):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -30,6 +49,7 @@ def save_json(path, value):
         out.flush()
         os.fsync(out.fileno())
     os.replace(temp, path)
+    sync_directory(path.parent)
 
 
 def load_json(path, default=None):
@@ -179,7 +199,10 @@ def ensure_backup(app, data):
             raise Error('The app changed while making its stock backup. Retry after updating finishes.')
         save_json(temporary / 'manifest.json', {
             'app': str(app), 'stockDigest': digest, **metadata, 'customDigests': []})
+        sync_bundle(temporary)
         os.replace(temporary, folder)
+        sync_directory(folder.parent)
+        sync_directory(folder.parent.parent)
     except BaseException:
         shutil.rmtree(temporary, ignore_errors=True)
         raise
@@ -190,6 +213,11 @@ def resolve_stock(app, data):
     metadata = read_metadata(app)
     marker = metadata['marker']
     if not marker:
+        state = load_json(data / 'state.json', {})
+        if (state.get('version') == metadata['version'] and state.get('commit') == metadata['commit']
+                and bundle_digest(app) != state.get('stockDigest')):
+            raise Error('Unmarked app was modified outside this tool; backups are retained. '
+                        'Restore a known official Nightly installation before retrying.')
         return app
     digest = marker.get('stockDigest', '')
     if len(digest) != 64 or any(c not in '0123456789abcdef' for c in digest):
@@ -240,15 +268,22 @@ def recover_transaction(app, data):
         if not rollback.is_dir() or bundle_digest(rollback) != expected:
             raise Error('Interrupted replacement needs manual recovery; stock backup was retained.')
         os.replace(rollback, app)
+        sync_directory(app.parent)
     elif bundle_digest(app) not in (expected, transaction.get('replacement')):
         raise Error('App changed after an interrupted replacement; recovery files were retained.')
     if rollback.exists():
         if bundle_digest(rollback) != expected:
             raise Error('Rollback copy changed; recovery files were retained.')
+        # A replacement or restored bundle is made durable before deleting
+        # the last sibling recovery copy or its journal.
+        sync_bundle(app)
+        sync_directory(app.parent)
         shutil.rmtree(rollback)
     if staging.exists():
         shutil.rmtree(staging)
     journal.unlink()
+    sync_directory(app.parent)
+    sync_directory(data)
 
 
 def replace_app(app, source, data, expected):
@@ -264,6 +299,8 @@ def replace_app(app, source, data, expected):
         copy_app(source, staging)
         if bundle_digest(staging) != replacement:
             raise Error('Staged app did not match its verified source.')
+        sync_bundle(staging)
+        sync_directory(app.parent)
         assert_closed(app)
         if bundle_digest(app) != expected:
             raise Error('Installed app changed before replacement; run reinstall.')
@@ -271,11 +308,19 @@ def replace_app(app, source, data, expected):
             'app': str(app), 'staging': str(staging), 'rollback': str(rollback),
             'expected': expected, 'replacement': replacement})
         os.replace(app, rollback)
+        sync_directory(app.parent)
         try:
             os.replace(staging, app)
+            sync_directory(app.parent)
         except BaseException:
+            # A failed durability barrier after the rename leaves both valid
+            # copies and the journal for the next recovery pass.
+            if app.exists():
+                raise
             os.replace(rollback, app)
+            sync_directory(app.parent)
             (data / 'transaction.json').unlink()
+            sync_directory(data)
             raise
         recover_transaction(app, data)
     finally:
@@ -338,12 +383,17 @@ def locate(args, api):
     explicit = getattr(args, 'app', None) or configured
     if explicit:
         path = Path(explicit).expanduser().absolute()
+        if path.is_symlink():
+            raise Error('Refusing a symlink installation; use the actual .app path.')
+        path = path.parent.resolve() / path.name
         # Recover a rename interrupted before the app was put back, before
         # discovery attempts to read the currently missing bundle.
         recover_transaction(path, app_data(api, path))
+        explicit = path
     app = find_app(explicit=explicit)
-    if getattr(args, 'app', None):
-        api.save(api.CONFIG / 'config.json', {**api.load(api.CONFIG / 'config.json', {}), 'app': str(app)})
+    # Save discovery before an install can move the app out of the way. Even
+    # if the bundle is temporarily missing, the next plain command can recover.
+    api.save(api.CONFIG / 'config.json', {**api.load(api.CONFIG / 'config.json', {}), 'app': str(app)})
     return app, app_data(api, app)
 
 
@@ -453,6 +503,7 @@ def dispatch(args, api):
         changed = restore(app, data)
         api.say('Restored official T3 Code.' if changed else 'T3 Code is already stock; no older backup was applied.')
         if args.command == 'uninstall':
+            verify_signature(app)
             if data.exists():
                 shutil.rmtree(data)
             remaining = list((api.DATA / 'macos').glob('*/state.json'))

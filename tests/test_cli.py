@@ -73,10 +73,6 @@ class CliTests(unittest.TestCase):
                     'keychain-access-groups': ['TEAM.app']}
         self.assertEqual(macos.local_entitlements(original), {'com.apple.security.cs.allow-jit': True})
 
-
-if __name__ == '__main__':
-    unittest.main()
-
 class InstallLifecycleTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -183,3 +179,84 @@ class InstallLifecycleTests(unittest.TestCase):
         macos.restore(self.app, data)
         self.assertEqual(macos.bundle_digest(self.app), new_digest)
         self.assertTrue((data / 'backups' / self.stock_digest / 'stock.app').exists())
+
+class ReviewRegressionTests(unittest.TestCase):
+    def test_private_node_download_uses_osx_index_and_darwin_archive(self):
+        import hashlib
+        import tarfile
+        import gzip
+        tar_buffer = io.BytesIO()
+        node = b'#!/bin/sh\necho 24.8.0\n'
+        with tarfile.open(fileobj=tar_buffer, mode='w') as bundle:
+            entry = tarfile.TarInfo('node-v24.8.0-darwin-arm64/bin/node')
+            entry.size = len(node)
+            entry.mode = 0o755
+            bundle.addfile(entry, io.BytesIO(node))
+        archive = gzip.compress(tar_buffer.getvalue())
+        def urlopen(url, **kwargs):
+            if url.endswith('index.json'):
+                return io.BytesIO(b'[{"version":"v24.8.0","files":["osx-arm64-tar","osx-x64-tar","linux-x64"]}]')
+            return io.BytesIO((hashlib.sha256(archive).hexdigest() + '  node-v24.8.0-darwin-arm64.tar.gz\n').encode())
+        def download(url, destination):
+            Path(destination).write_bytes(archive)
+        with tempfile.TemporaryDirectory() as temp, patch.object(tool, 'CACHE', Path(temp)), \
+                patch.object(tool.shutil, 'which', return_value=None), patch.object(tool.sys, 'platform', 'darwin'), \
+                patch.object(tool.os, 'uname') as uname, patch.object(tool.urllib.request, 'urlopen', side_effect=urlopen), \
+                patch.object(tool.urllib.request, 'urlretrieve', side_effect=download):
+            uname.return_value.machine = 'arm64'
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    node_bin = tool.ensure_node(None)
+            except StopIteration:
+                self.fail('No macOS release matched the real osx-arm64-tar index identifier')
+            self.assertEqual(tool.node_major(str(node_bin / 'node')), 24)
+
+    def test_status_cannot_enter_recovery_while_install_lock_is_held(self):
+        import fcntl
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            app = app_fixture(root)
+            cache = root / 'cache'
+            cache.mkdir()
+            with (cache / 'lock').open('w') as held:
+                fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                with patch.object(tool, 'CACHE', cache), patch.object(tool, 'DATA', root / 'data'), \
+                     patch.object(tool, 'CONFIG', root / 'config'), patch.object(tool.sys, 'platform', 'darwin'), \
+                     patch.object(tool.sys, 'argv', ['t3code-customize', 'status', '--app', str(app)]):
+                    with self.assertRaisesRegex(tool.Stop, 'already running'):
+                        with contextlib.redirect_stdout(io.StringIO()):
+                            tool.main()
+
+    def test_auto_discovery_is_saved_for_missing_app_recovery(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            app = app_fixture(root)
+            args = type('Args', (), {'command': 'status', 'app': None})()
+            with patch.object(tool, 'DATA', root / 'data'), patch.object(tool, 'CONFIG', root / 'config'), \
+                 patch.object(macos, 'find_app', return_value=app):
+                macos.locate(args, tool)
+            saved = tool.load(root / 'config/config.json', {})
+            self.assertEqual(saved.get('app'), str(app), 'Discovery was not saved before potential replacement')
+
+    def test_tracked_source_edit_during_build_is_refused(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            subprocess.run(['git', 'init', '-q', str(root)], check=True)
+            source = root / 'source.ts'
+            source.write_text('validated code')
+            subprocess.run(['git', '-C', str(root), 'add', '.'], check=True)
+            subprocess.run(['git', '-C', str(root), '-c', 'user.name=Test', '-c', 'user.email=test@example.com',
+                            'commit', '-qm', 'baseline'], check=True)
+            head = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
+            args = type('Args', (), {'resume': False, 'skip_checks': False, 'fix': None})()
+            with patch.object(tool, 'SOURCE', root), patch.object(tool, 'ensure_node', return_value=None), \
+                    patch.object(tool, 'ensure_commit', return_value=head), patch.object(tool, 'prepare'), \
+                    patch.object(tool, 'install_dependencies'), patch.object(tool, 'checks'), \
+                    patch.object(tool, 'build_bundles', side_effect=lambda *a: source.write_text('unvalidated edit')):
+                with self.assertRaisesRegex(tool.Stop, 'source checkout changed'):
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        tool.build_for_version(args, 'nightly.1', head, root, {}, None)
+
+
+if __name__ == '__main__':
+    unittest.main()

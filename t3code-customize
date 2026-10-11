@@ -330,7 +330,11 @@ def ensure_node(log):
     step('Downloading Node 24 (one time, private to this tool)...')
     with urllib.request.urlopen('https://nodejs.org/dist/index.json', timeout=30) as response:
         releases = json.load(response)
-    version = next(r['version'] for r in releases if r['version'].startswith('v24.') and f'{platform}-{arch}' in r['files'])
+    index_target = f'osx-{arch}-tar' if platform == 'darwin' else f'{platform}-{arch}'
+    version = next((r['version'] for r in releases
+                    if r['version'].startswith('v24.') and index_target in r['files']), None)
+    if version is None:
+        raise Stop(f'No Node 24 download was published for {platform}/{arch}. Install Node 24 or newer and retry.')
     name = f'node-{version}-{platform}-{arch}'
     base = f'https://nodejs.org/dist/{version}/'
     with urllib.request.urlopen(base + 'SHASUMS256.txt', timeout=30) as response:
@@ -585,8 +589,12 @@ def build_for_version(args, version, commit, stock_root, config, log):
         try:
             prepare(target, log, resume=resume)
             install_dependencies(env, log)
+            validated_head = git('rev-parse', 'HEAD').strip()
             if not args.skip_checks:
                 checks(env, log)
+            if (git('rev-parse', 'HEAD').strip() != validated_head
+                    or git('status', '--porcelain', '--untracked-files=no').strip()):
+                raise Stop('The source checkout changed during the checks; retry from clean source.')
             break
         except NeedsFix as problem:
             if older_than_patches(target):
@@ -600,7 +608,8 @@ def build_for_version(args, version, commit, stock_root, config, log):
             resume = ported = True
     head = git('rev-parse', 'HEAD').strip()
     build_bundles(env, version, stock_root, config, log)
-    if git('rev-parse', 'HEAD').strip() != head:
+    if (git('rev-parse', 'HEAD').strip() != head
+            or git('status', '--porcelain', '--untracked-files=no').strip()):
         raise Stop('The source checkout changed during the build.')
     return target, ported
 
@@ -806,7 +815,7 @@ def main():
     is_mac = sys.platform == 'darwin' and args.command != 'verify'
     alias = {'install': 'build', 'reinstall': 'build', 'restore': 'off'}.get(args.command, args.command)
     handler = (lambda a: macos.dispatch(a, sys.modules[__name__])) if is_mac else globals()['cmd_' + alias]
-    if args.command in ('launch', 'status') or (not is_mac and args.command in ('on', 'off', 'restore')):
+    if not is_mac and args.command in ('launch', 'status', 'on', 'off', 'restore'):
         return handler(args)
     CACHE.mkdir(parents=True, exist_ok=True)
     with (CACHE / 'lock').open('w') as lock:

@@ -162,6 +162,50 @@ class MacTests(unittest.TestCase):
         self.assertEqual(macos.bundle_digest(self.app), digest)
         self.assertFalse((self.data / 'transaction.json').exists())
 
+class RecoveryRegressionTests(unittest.TestCase):
+    setUp = MacTests.setUp
+
+    def test_missing_marker_never_discards_backup_on_uninstall(self):
+        import contextlib
+        import io
+        from types import SimpleNamespace
+        digest = macos.bundle_digest(self.app)
+        backup = macos.ensure_backup(self.app, self.data)
+        stage = app_fixture(self.root / 'custom', content=b'customized')
+        macos.set_marker(stage, {'stockDigest': digest})
+        with patch.object(macos, 'assert_closed'):
+            macos.replace_app(self.app, stage, self.data, expected=digest)
+        macos.record_build(self.app, self.data, backup, recipe='test')
+        info = macos.read_info(self.app)
+        info.pop(macos.MARKER)
+        macos.write_info(self.app, info)
+        api = SimpleNamespace(DATA=self.root / 'all-data', CONFIG=self.root / 'config',
+                              BIN=self.root / 'bin/tool', REPO=self.root, NAME='tool',
+                              load=macos.load_json, save=macos.save_json, say=print)
+        args = SimpleNamespace(command='uninstall', app=str(self.app))
+        with patch.object(macos, 'app_data', return_value=self.data):
+            with self.assertRaisesRegex(macos.Error, 'modified|changed|recognized'):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    macos.dispatch(args, api)
+        self.assertTrue(backup.exists())
+
+    def test_failed_durability_barrier_preserves_rollback_and_journal(self):
+        self.assertTrue(hasattr(macos, 'sync_directory'), 'Transaction durability barriers are missing')
+        expected = macos.bundle_digest(self.app)
+        stage = app_fixture(self.root / 'custom', content=b'custom')
+        replacement = macos.bundle_digest(stage)
+        real_sync = macos.sync_directory
+        def fail_after_install(path):
+            if path == self.app.parent and self.app.exists() and macos.bundle_digest(self.app) == replacement:
+                raise OSError('simulated durability failure')
+            real_sync(path)
+        with patch.object(macos, 'assert_closed'), patch.object(macos, 'sync_directory', side_effect=fail_after_install):
+            with self.assertRaisesRegex(OSError, 'durability failure'):
+                macos.replace_app(self.app, stage, self.data, expected=expected)
+        journal = macos.load_json(self.data / 'transaction.json')
+        self.assertIsNotNone(journal)
+        self.assertTrue(Path(journal['rollback']).exists())
+
 
 if __name__ == '__main__':
     unittest.main()
