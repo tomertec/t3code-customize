@@ -1,0 +1,350 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tomer Vaknin <tomer@tec.org.il>
+Date: Tue, 13 Oct 2026 18:04:47 +0300
+Subject: [PATCH] feat(web): add provider icons and accent colors to composer
+ stats
+
+---
+ apps/web/src/components/ChatView.tsx          |   1 +
+ .../web/src/components/chat/ComposerStats.tsx | 148 ++++++++++++++----
+ 2 files changed, 118 insertions(+), 31 deletions(-)
+
+diff --git a/apps/web/src/components/ChatView.tsx b/apps/web/src/components/ChatView.tsx
+index d3efd7745..959d9637f 100644
+--- a/apps/web/src/components/ChatView.tsx
++++ b/apps/web/src/components/ChatView.tsx
+@@ -12024,6 +12024,7 @@ export default function ChatView(props: ChatViewProps) {
+                       {composerStats !== null && (
+                         <ComposerStats
+                           {...composerStats}
++                          providerDriver={selectedProvider}
+                           onCompact={() => composerRef.current?.compactContext()}
+                           compactDisabled={compactDisabled}
+                           compactDisabledReason={
+diff --git a/apps/web/src/components/chat/ComposerStats.tsx b/apps/web/src/components/chat/ComposerStats.tsx
+index 6810e9cb3..0d2672ff6 100644
+--- a/apps/web/src/components/chat/ComposerStats.tsx
++++ b/apps/web/src/components/chat/ComposerStats.tsx
+@@ -10,6 +10,7 @@ import * as DateTime from "effect/DateTime";
+ import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+ 
+ import { type ContextWindowSnapshot, formatContextWindowTokens } from "~/lib/contextWindow";
++import { ClaudeAI, OpenAI } from "../Icons";
+ import { Button } from "../ui/button";
+ import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
+ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+@@ -27,6 +28,41 @@ import {
+   selectComposerLimitWindows,
+ } from "./ComposerStats.logic";
+ 
++function providerAppearance(driver: string | undefined) {
++  switch (driver) {
++    case "codex":
++      return {
++        name: "Codex",
++        Icon: OpenAI,
++        theme: "[--stats-accent:#0f766e] dark:[--stats-accent:#5eead4]",
++      };
++    case "claudeAgent":
++      return {
++        name: "Claude",
++        Icon: ClaudeAI,
++        theme: "[--stats-accent:#a84e32] dark:[--stats-accent:#e7a38b]",
++      };
++    default:
++      return { name: null, Icon: null, theme: "[--stats-accent:var(--muted-foreground)]" };
++  }
++}
++
++function ProviderIdentity({ driver, name }: { driver: string | undefined; name?: string }) {
++  const provider = providerAppearance(driver);
++  const Icon = provider.Icon;
++  return (
++    <span className="inline-flex min-w-0 items-center gap-1.5 text-[var(--stats-accent)]">
++      {Icon && <Icon aria-hidden="true" className="size-3.5 shrink-0" />}
++      <span className="truncate font-medium">{name ?? provider.name ?? "Provider"}</span>
++    </span>
++  );
++}
++
++const STATS_PANEL =
++  "rounded-xl ring-1 ring-inset ring-[color:var(--stats-accent)]/20 [&_p]:leading-relaxed";
++const STATS_TRIGGER =
++  "rounded-md px-1.5 py-0.5 -mx-1.5 transition-colors hover:bg-[color:var(--stats-accent)]/10 focus-visible:bg-[color:var(--stats-accent)]/10";
++
+ function ElapsedTime({ turn }: { turn: OrchestrationV2ProviderTurn }) {
+   const textRef = useRef<HTMLSpanElement>(null);
+   const initialElapsed = turn.status === "running" ? 0 : deriveTurnElapsedMs(turn, 0);
+@@ -47,18 +83,24 @@ function ElapsedTime({ turn }: { turn: OrchestrationV2ProviderTurn }) {
+ 
+ function Detail({ label, children }: { label: string; children: ReactNode }) {
+   return (
+-    <div className="flex items-baseline justify-between gap-4">
++    <div className="flex items-baseline justify-between gap-4 rounded-md bg-muted/40 px-2 py-1.5">
+       <dt className="text-muted-foreground">{label}</dt>
+       <dd className="text-right tabular-nums">{children}</dd>
+     </div>
+   );
+ }
+ 
+-function ContextBar({ percentage }: { percentage: number }) {
++function ContextBar({
++  percentage,
++  pressure = percentage,
++}: {
++  percentage: number;
++  pressure?: number;
++}) {
+   return (
+-    <span aria-hidden="true" className="block h-2 w-full overflow-hidden rounded-sm bg-muted">
++    <span aria-hidden="true" className="block h-1.5 w-full overflow-hidden rounded-full bg-muted">
+       <span
+-        className="block h-full bg-muted-foreground/60"
++        className={`block h-full rounded-full ${TONE_FILL[toneOf(pressure)]}`}
+         style={{ width: `${Math.max(0, Math.min(100, percentage))}%` }}
+       />
+     </span>
+@@ -72,12 +114,12 @@ function toneOf(usedPercent: number): Tone {
+ }
+ 
+ const TONE_TEXT: Record<Tone, string> = {
+-  normal: "text-foreground/80",
++  normal: "text-[var(--stats-accent)]",
+   warning: "text-warning",
+   critical: "text-destructive",
+ };
+ const TONE_FILL: Record<Tone, string> = {
+-  normal: "bg-foreground/45",
++  normal: "bg-[var(--stats-accent)]",
+   warning: "bg-warning",
+   critical: "bg-destructive",
+ };
+@@ -165,11 +207,14 @@ function UsageLimitRows({
+   now: number;
+ }) {
+   return (
+-    <dl className="space-y-2">
++    <dl className="space-y-3">
+       {windows.map((window) => {
+         const display = composerLimitDisplay(window, checkedAt, now);
+         return (
+-          <div key={window.id} className="space-y-1">
++          <div
++            key={window.id}
++            className="space-y-2 rounded-lg border border-border/60 bg-muted/20 p-3"
++          >
+             <div className="flex items-baseline justify-between gap-4">
+               <dt className="text-muted-foreground">{window.label}</dt>
+               <dd
+@@ -185,20 +230,18 @@ function UsageLimitRows({
+             <div className={display.dimmed ? "opacity-50" : ""}>
+               <ContextBar percentage={display.displayPercent ?? 0} />
+             </div>
+-            <p className="text-right text-muted-foreground tabular-nums">
++            <p className="text-muted-foreground tabular-nums">
+               {usageReadingLabel(window, checkedAt, now)}
+             </p>
+             {display.resetPending ? (
+-              <p className="text-right text-muted-foreground tabular-nums">
++              <p className="text-muted-foreground tabular-nums">
+                 {window.resetsAt
+                   ? `Reset at ${formatUsageTimestamp(window.resetsAt)}, waiting for a new reading`
+                   : "Waiting for a new reading"}
+               </p>
+             ) : (
+               formatResetsIn(window, now) && (
+-                <p className="text-right text-muted-foreground tabular-nums">
+-                  {formatResetsIn(window, now)}
+-                </p>
++                <p className="text-muted-foreground tabular-nums">{formatResetsIn(window, now)}</p>
+               )
+             )}
+           </div>
+@@ -211,9 +254,11 @@ function UsageLimitRows({
+ function UsageLimitsSummary({
+   limits,
+   providerName,
++  driver,
+ }: {
+   limits: ServerProviderUsageLimits;
+   providerName: string;
++  driver: string | undefined;
+ }) {
+   const [now, setNow] = useState(Date.now);
+   useEffect(() => {
+@@ -236,7 +281,7 @@ function UsageLimitsSummary({
+           <button
+             type="button"
+             aria-label="Usage limit details"
+-            className="inline-flex flex-wrap items-center gap-x-4 rounded-sm text-left -outline-offset-2"
++            className={`inline-flex flex-wrap items-center gap-x-4 text-left -outline-offset-2 ${STATS_TRIGGER}`}
+           />
+         }
+       >
+@@ -254,11 +299,18 @@ function UsageLimitsSummary({
+           );
+         })}
+       </PopoverTrigger>
+-      <PopoverPopup {...composerFloatingLayerProps} side="top" align="start" width="md">
++      <PopoverPopup
++        {...composerFloatingLayerProps}
++        side="top"
++        align="start"
++        sideOffset={8}
++        width="md"
++        className={`${providerAppearance(driver).theme} ${STATS_PANEL}`}
++      >
+         <div className="flex flex-col gap-3 text-xs">
+-          <div className="flex items-baseline justify-between gap-4">
+-            <h3 className="font-medium">Usage limits</h3>
+-            <span className="truncate text-muted-foreground">{providerName}</span>
++          <div className="flex items-center justify-between gap-4 border-b border-border/60 pb-3">
++            <h3 className="shrink-0 font-semibold">Usage limits</h3>
++            <ProviderIdentity driver={driver} name={providerName} />
+           </div>
+           <UsageLimitRows windows={limits.windows} checkedAt={limits.checkedAt} now={now} />
+           <p className="text-muted-foreground">
+@@ -280,6 +332,7 @@ export function ComposerStats({
+   turn,
+   compactions,
+   usageLimits,
++  providerDriver,
+   contextDriver,
+   configuredClaudeThreshold,
+   onCompact,
+@@ -291,6 +344,7 @@ export function ComposerStats({
+   turn: OrchestrationV2ProviderTurn | null;
+   compactions: ReadonlyArray<Extract<OrchestrationV2TurnItem, { type: "compaction" }>>;
+   usageLimits: { limits: ServerProviderUsageLimits; providerName: string } | null;
++  providerDriver: string | undefined;
+   contextDriver: string | undefined;
+   configuredClaudeThreshold: unknown;
+   onCompact: () => void;
+@@ -298,6 +352,8 @@ export function ComposerStats({
+   compactDisabledReason: string | null;
+   isCompacting: boolean;
+ }) {
++  const provider = providerAppearance(contextDriver);
++  const selectedProvider = providerAppearance(providerDriver);
+   const compaction = deriveContextCompaction(context, contextDriver, configuredClaudeThreshold);
+   const responseRate = deriveResponseRate(turn);
+   const piSpeed =
+@@ -346,7 +402,7 @@ export function ComposerStats({
+               <button
+                 type="button"
+                 aria-label="Turn token details"
+-                className="inline-flex items-center gap-1 rounded-sm text-left -outline-offset-2"
++                className={`inline-flex items-center gap-1 text-left -outline-offset-2 ${STATS_TRIGGER}`}
+               />
+             }
+           >
+@@ -359,11 +415,21 @@ export function ComposerStats({
+               <Label>Tokens</Label>
+             )}
+           </PopoverTrigger>
+-          <PopoverPopup {...composerFloatingLayerProps} side="top" align="start" width="md">
++          <PopoverPopup
++            {...composerFloatingLayerProps}
++            side="top"
++            align="start"
++            sideOffset={8}
++            width="md"
++            className={`${provider.theme} ${STATS_PANEL}`}
++          >
+             <div className="flex flex-col gap-3 text-xs">
+-              <h3 className="font-medium">
+-                {turn.status === "running" ? "Current" : "Latest"} main-agent turn
+-              </h3>
++              <div className="flex items-center justify-between gap-4 border-b border-border/60 pb-3">
++                <h3 className="font-semibold">
++                  {turn.status === "running" ? "Current" : "Latest"} turn
++                </h3>
++                <ProviderIdentity driver={contextDriver} />
++              </div>
+               <dl className="space-y-1.5">
+                 <Detail label="Status">{turn.status}</Detail>
+                 {rateText !== null && <Detail label="Output rate">{rateText} tok/s</Detail>}
+@@ -420,7 +486,7 @@ export function ComposerStats({
+             <Value>{formatCachePercentage(cachePercentage)}</Value>
+             <Label>cached</Label>
+           </TooltipTrigger>
+-          <TooltipPopup>
++          <TooltipPopup className={`${provider.theme} ${STATS_PANEL}`}>
+             Input served from cache on this main-agent turn:{" "}
+             {count(availableUsage?.cachedInputTokens)} of {count(availableUsage?.inputTokens)}{" "}
+             tokens. Cached input generally costs less; this is not a session-wide cache rate.
+@@ -444,7 +510,7 @@ export function ComposerStats({
+               <button
+                 type="button"
+                 aria-label="Context usage details"
+-                className="inline-flex items-center rounded-sm text-left -outline-offset-2"
++                className={`inline-flex items-center text-left -outline-offset-2 ${STATS_TRIGGER}`}
+               />
+             }
+           >
+@@ -459,10 +525,21 @@ export function ComposerStats({
+               <Label>context</Label>
+             </span>
+           </PopoverTrigger>
+-          <PopoverPopup {...composerFloatingLayerProps} side="top" align="end" width="md">
++          <PopoverPopup
++            {...composerFloatingLayerProps}
++            side="top"
++            align="end"
++            sideOffset={8}
++            width="md"
++            className={`${provider.theme} ${STATS_PANEL}`}
++          >
+             <div className="flex flex-col gap-3 text-xs">
++              <div className="flex items-center justify-between gap-4 border-b border-border/60 pb-3">
++                <h3 className="font-semibold">Context usage</h3>
++                <ProviderIdentity driver={contextDriver} />
++              </div>
+               <div className="flex items-baseline justify-between gap-4">
+-                <h3 className="font-medium">Context usage</h3>
++                <span className="text-muted-foreground">Window occupancy</span>
+                 <span className="text-muted-foreground tabular-nums">
+                   {context?.usedPercentage != null
+                     ? `${Math.round(context.usedPercentage)}% of window`
+@@ -470,7 +547,10 @@ export function ComposerStats({
+                 </span>
+               </div>
+               {context?.usedPercentage != null && (
+-                <ContextBar percentage={context.usedPercentage} />
++                <ContextBar
++                  percentage={context.usedPercentage}
++                  pressure={compaction.pressurePercentage}
++                />
+               )}
+               <dl className="space-y-1.5">
+                 <Detail label="Used tokens">
+@@ -549,6 +629,7 @@ export function ComposerStats({
+                 <Button
+                   size="xs"
+                   variant="outline"
++                  className="border-[color:var(--stats-accent)]/30 text-[var(--stats-accent)] hover:bg-[color:var(--stats-accent)]/10"
+                   disabled={compactDisabled || isCompacting}
+                   onClick={onCompact}
+                 >
+@@ -577,13 +658,18 @@ export function ComposerStats({
+     <div
+       data-composer-stats="true"
+       aria-label="Stats for nerds"
+-      className="flex flex-wrap items-center gap-x-4 gap-y-1 px-5 pt-1.5 text-2xs leading-4 text-muted-foreground tabular-nums"
++      className={`flex flex-wrap items-center gap-x-4 gap-y-1 px-5 pt-1.5 text-2xs leading-4 text-muted-foreground tabular-nums ${selectedProvider.theme}`}
+     >
++      {selectedProvider.Icon && <ProviderIdentity driver={providerDriver} />}
+       {usageLimits && (
+-        <UsageLimitsSummary limits={usageLimits.limits} providerName={usageLimits.providerName} />
++        <UsageLimitsSummary
++          limits={usageLimits.limits}
++          providerName={usageLimits.providerName}
++          driver={providerDriver}
++        />
+       )}
+       {stats.length > 0 && (
+-        <span className="ms-auto inline-flex flex-wrap items-center gap-x-2.5">
++        <span className={`ms-auto inline-flex flex-wrap items-center gap-x-2.5 ${provider.theme}`}>
+           {stats.map(({ key, node }, index) => (
+             <Fragment key={key}>
+               {index > 0 && (

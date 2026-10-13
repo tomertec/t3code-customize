@@ -12,3 +12,10 @@
 ## Ledger
 - Approved design; existing source checkout is clean and has all four patches applied.
 - Work in the existing prepared checkout as required by AGENTS.md.
+- Implementation also passes selectedProvider from apps/web/src/components/ChatView.tsx, so new threads and provider changes show the correct account icon. Context/turn metrics retain their session identity.
+- Review found and verified the provider-source correction. Scoped web typecheck and formatter passed.
+- Standard WSL build passed 765 tests and nine typechecks, then Node 24.21.0 crashed during web transformation. Maglev-disabled and optimization-disabled probes did not build successfully. A JIT-less probe was incompatible with the bundler's WebAssembly use.
+- Retrying the corrected patch and diagnosing with a checksum-verified private Node 24.13.1; required checks remain enabled.
+- Final corrected source 56d5eb013 passed all 17 test files (765 tests) and all nine checks.json typechecks. The second standard build also failed at vp build with exit 139. Node 24.13.1 and a probe disabling Maglev, optimizing JIT, and Sparkplug did not produce a usable web build.
+- Final review is clean; reverse-apply validation confirms the saved fifth patch matches the source commit. Source checkout is clean with no rebase. No upstream changes were needed. Existing patches and checks are preserved.
+- Packaging remains blocked by the local V8/bundler crash. No new package was installed; the documented GitHub Actions checked-bundle fallback requires publishing this patch to the repository before it can build it.
