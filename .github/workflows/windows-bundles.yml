@@ -1,6 +1,17 @@
 name: Build Windows customization bundles
 
 on:
+  workflow_call:
+    inputs:
+      commit:
+        required: true
+        type: string
+      appVersion:
+        required: true
+        type: string
+      publicConfig:
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       commit:

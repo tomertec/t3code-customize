@@ -5,8 +5,28 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      commit:
+        description: Installed T3 commit for an optional Windows bundle build
+        required: false
+      appVersion:
+        description: Installed Nightly version
+        required: false
+      publicConfig:
+        description: Public Connect config JSON
+        required: false
+        default: '{}'
 
 jobs:
+  windows-bundles:
+    if: github.event_name == 'workflow_dispatch' && inputs.commit != ''
+    uses: ./.github/workflows/windows-bundles.yml
+    permissions:
+      contents: read
+    with:
+      commit: ${{ inputs.commit }}
+      appVersion: ${{ inputs.appVersion }}
+      publicConfig: ${{ inputs.publicConfig }}
   installer-tests:
     strategy:
       matrix:
