@@ -12,6 +12,7 @@ This fork adds macOS support to [btsouth/t3code-customize](https://github.com/bt
 - **Context** used in the thread. Hover it for the window size, the auto-compaction threshold and a Compact now button.
 - **Tokens per second** for the last response, with turn time and token details on hover. Claude rates are measured from the stream; Codex rates are labeled approximate.
 - **Cache rate** for the last turn.
+- **Provider icons and colors** in the stats footer and detail panels: teal for Codex, terracotta for Claude, with light and dark theme support. The same UI patch is used on Windows, macOS and Linux.
 
 The patches retain T3 Connect public configuration. The macOS signing and update differences are described below.
 
@@ -86,6 +87,16 @@ Alternatively, clone this fork and run `./t3code-customize install`. If the app 
 ```
 
 To build while T3 Code is open, use `./t3code-customize install --build-only`. Once it completes, quit the app and run `t3code-customize install` to apply the cached build. If `~/.local/bin` is not on your PATH, use `~/.local/bin/t3code-customize` or the script in your clone. Do not run the whole installer with sudo. The installed app and its parent directory must be writable.
+
+For a checkout containing local patches, including the provider UI patch, prepare without pulling over your local version:
+
+```sh
+./t3code-customize build --build-only --no-pull
+# After a successful build, quit T3 Code and apply it:
+./t3code-customize install --no-pull
+```
+
+The macOS build uses all patches in `patches/` and targets the exact commit recorded in your installed Nightly. The UI patch has no Windows-specific APIs or assets. Different Nightly commits can still require porting; a conflict or failed check stops the build before installation.
 
 ### Updating Nightly on macOS
 
