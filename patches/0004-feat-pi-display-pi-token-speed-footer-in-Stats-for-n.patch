@@ -1,0 +1,523 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tomer Vaknin <tomer@tec.org.il>
+Date: Tue, 13 Oct 2026 16:31:44 +0300
+Subject: [PATCH 4/4] feat(pi): display pi-token-speed footer in Stats for
+ nerds
+
+---
+ .../orchestration-v2/ProjectionStore.test.ts  | 13 ++-
+ .../src/orchestration-v2/ProjectionStore.ts   | 13 ++-
+ .../chat/ComposerStats.logic.test.ts          | 36 +++++++++
+ .../components/chat/ComposerStats.logic.ts    |  6 ++
+ .../web/src/components/chat/ComposerStats.tsx | 13 ++-
+ .../state/orchestrationV2Projection.test.ts   | 12 +++
+ .../src/state/orchestrationV2Projection.ts    | 10 +++
+ .../contracts/src/orchestrationV2.test.ts     | 24 ++++++
+ packages/contracts/src/orchestrationV2.ts     |  9 +++
+ .../provider-pi/src/server/adapter.test.ts    | 79 +++++++++++++++++++
+ packages/provider-pi/src/server/adapter.ts    | 34 +++++++-
+ .../provider-pi/src/server/tokenSpeed.test.ts | 31 ++++++++
+ packages/provider-pi/src/server/tokenSpeed.ts | 17 ++++
+ 13 files changed, 289 insertions(+), 8 deletions(-)
+ create mode 100644 packages/provider-pi/src/server/tokenSpeed.test.ts
+ create mode 100644 packages/provider-pi/src/server/tokenSpeed.ts
+
+diff --git a/apps/server/src/orchestration-v2/ProjectionStore.test.ts b/apps/server/src/orchestration-v2/ProjectionStore.test.ts
+index 4ebbf378a..8152cdf46 100644
+--- a/apps/server/src/orchestration-v2/ProjectionStore.test.ts
++++ b/apps/server/src/orchestration-v2/ProjectionStore.test.ts
+@@ -684,7 +684,12 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
+         nodeId,
+         driver,
+         occurredAt: now,
+-        payload: { ...providerTurn, tokenUsage: initialUsage, responseThroughput: throughput },
++        payload: {
++          ...providerTurn,
++          tokenUsage: initialUsage,
++          responseThroughput: throughput,
++          responseTokenSpeed: { basis: "pi_token_speed_extension", tokensPerSecond: 32.5 },
++        },
+       });
+       yield* projectionStore.apply({
+         id: EventId.make("event:provider-usage-reload:without-usage"),
+@@ -696,6 +701,10 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
+         payload: { ...providerTurn, status: "completed", completedAt: now },
+       });
+       const withoutUsage = yield* projectionStore.getThreadProjection(threadId);
++      assert.deepEqual(withoutUsage.providerTurns[0]?.responseTokenSpeed, {
++        basis: "pi_token_speed_extension",
++        tokensPerSecond: 32.5,
++      });
+       assert.deepEqual(withoutUsage.providerTurns[0]?.tokenUsage, initialUsage);
+       assert.deepEqual(withoutUsage.providerTurns[0]?.responseThroughput, throughput);
+ 
+@@ -732,10 +741,12 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
+           completedAt: now,
+           tokenUsage: replacementUsage,
+           responseThroughput: { ...throughput, partial: true },
++          responseTokenSpeed: null,
+         },
+       });
+ 
+       const replaced = yield* projectionStore.getThreadProjection(threadId);
++      assert.isNull(replaced.providerTurns[0]?.responseTokenSpeed);
+       assert.deepEqual(replaced.providerTurns[0]?.tokenUsage, replacementUsage);
+       assert.deepEqual(replaced.providerTurns[0]?.responseThroughput, {
+         ...throughput,
+diff --git a/apps/server/src/orchestration-v2/ProjectionStore.ts b/apps/server/src/orchestration-v2/ProjectionStore.ts
+index 8621c74bc..dd4eb2cd4 100644
+--- a/apps/server/src/orchestration-v2/ProjectionStore.ts
++++ b/apps/server/src/orchestration-v2/ProjectionStore.ts
+@@ -638,6 +638,16 @@ export function upsertProviderTurn(
+     ...((next.tokenUsage ?? current?.tokenUsage) === undefined
+       ? {}
+       : { tokenUsage: next.tokenUsage ?? current?.tokenUsage }),
++    ...((next.responseTokenSpeed !== undefined
++      ? next.responseTokenSpeed
++      : current?.responseTokenSpeed) === undefined
++      ? {}
++      : {
++          responseTokenSpeed:
++            next.responseTokenSpeed !== undefined
++              ? next.responseTokenSpeed
++              : current?.responseTokenSpeed,
++        }),
+     ...((next.responseThroughput ?? current?.responseThroughput) === undefined
+       ? {}
+       : { responseThroughput: next.responseThroughput ?? current?.responseThroughput }),
+@@ -2264,7 +2274,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
+           case "provider-turn.updated": {
+             const existingRows =
+               event.payload.tokenUsage === undefined ||
+-              event.payload.responseThroughput === undefined
++              event.payload.responseThroughput === undefined ||
++              event.payload.responseTokenSpeed === undefined
+                 ? yield* sql<PayloadRow>`
+                     SELECT payload_json
+                     FROM orchestration_v2_projection_provider_turns
+diff --git a/apps/web/src/components/chat/ComposerStats.logic.test.ts b/apps/web/src/components/chat/ComposerStats.logic.test.ts
+index 79b01fd80..206eb9b42 100644
+--- a/apps/web/src/components/chat/ComposerStats.logic.test.ts
++++ b/apps/web/src/components/chat/ComposerStats.logic.test.ts
+@@ -533,3 +533,39 @@ describe("context compaction pressure", () => {
+     ).toMatchObject({ remainingTokens: 220_000, pressurePercentage: 90 });
+   });
+ });
++
++describe("Pi extension speed", () => {
++  const piTurn = {
++    ...turn(1),
++    nativeTurnRef: { driver: ProviderDriverKind.make("pi"), nativeId: "pi-turn", strength: "strong" as const },
++  };
++  it("uses reported speed independently of whole-turn wall time", () => {
++    for (const tokensPerSecond of [0, 32.5]) {
++      expect(
++        deriveResponseRate({
++          ...piTurn,
++          responseTokenSpeed: { basis: "pi_token_speed_extension", tokensPerSecond },
++        }),
++      ).toBe(tokensPerSecond);
++    }
++    expect(deriveResponseRate(piTurn)).toBeNull();
++    expect(deriveResponseRate({ ...piTurn, responseTokenSpeed: null })).toBeNull();
++  });
++  it("rejects invalid readings and another driver", () => {
++    for (const tokensPerSecond of [-1, NaN, Infinity]) {
++      expect(
++        deriveResponseRate({
++          ...piTurn,
++          responseTokenSpeed: { basis: "pi_token_speed_extension", tokensPerSecond },
++        }),
++      ).toBeNull();
++    }
++    expect(
++      deriveResponseRate({
++        ...piTurn,
++        nativeTurnRef: { ...piTurn.nativeTurnRef, driver: ProviderDriverKind.make("codex") },
++        responseTokenSpeed: { basis: "pi_token_speed_extension", tokensPerSecond: 35 },
++      }),
++    ).toBeNull();
++  });
++});
+diff --git a/apps/web/src/components/chat/ComposerStats.logic.ts b/apps/web/src/components/chat/ComposerStats.logic.ts
+index 8c8236a63..7e6856ea4 100644
+--- a/apps/web/src/components/chat/ComposerStats.logic.ts
++++ b/apps/web/src/components/chat/ComposerStats.logic.ts
+@@ -118,6 +118,12 @@ export function selectRecordedCompactions(
+ 
+ /** Persisted provider telemetry is independent of whole-turn wall time. */
+ export function deriveResponseRate(turn: OrchestrationV2ProviderTurn | null): number | null {
++  const speed = turn?.responseTokenSpeed;
++  if (turn?.nativeTurnRef?.driver === "pi" && speed?.basis === "pi_token_speed_extension") {
++    return Number.isFinite(speed.tokensPerSecond) && speed.tokensPerSecond >= 0
++      ? speed.tokensPerSecond
++      : null;
++  }
+   const throughput = turn?.responseThroughput;
+   if (
+     !(
+diff --git a/apps/web/src/components/chat/ComposerStats.tsx b/apps/web/src/components/chat/ComposerStats.tsx
+index 53b81a83a..6810e9cb3 100644
+--- a/apps/web/src/components/chat/ComposerStats.tsx
++++ b/apps/web/src/components/chat/ComposerStats.tsx
+@@ -300,7 +300,10 @@ export function ComposerStats({
+ }) {
+   const compaction = deriveContextCompaction(context, contextDriver, configuredClaudeThreshold);
+   const responseRate = deriveResponseRate(turn);
+-  const estimated = turn?.responseThroughput?.basis === "codex_active_windows_estimate";
++  const piSpeed =
++    turn?.nativeTurnRef?.driver === "pi" &&
++    turn.responseTokenSpeed?.basis === "pi_token_speed_extension";
++  const estimated = piSpeed || turn?.responseThroughput?.basis === "codex_active_windows_estimate";
+   const usage = turn?.turnTokenUsage;
+   const availableUsage = usage?.usageStatus !== "unavailable" ? usage : undefined;
+   const cachePercentage = deriveTurnCachePercentage(availableUsage);
+@@ -382,9 +385,11 @@ export function ComposerStats({
+               </p>
+               {rateText !== null && (
+                 <p className="text-muted-foreground">
+-                  {estimated
+-                    ? "Output rate: Codex-reported turn output tokens, including reasoning and tool arguments, divided by estimated response-active time. Observed reasoning, text and plan windows exclude local tool, approval and input waits where visible. Silent reasoning, queue time and tool argument generation may be missed."
+-                    : "Output rate: Claude-reported output tokens, including reasoning and tool arguments, divided by observed response start-to-stop time. Includes network, buffering and server-side waits; excludes local tool waits between responses."}
++                  {piSpeed
++                    ? "Output rate reported by pi-token-speed. Live readings may estimate tokens from streaming chunks; the final reading depends on extension settings and provider usage availability. This is observed throughput, not a model-engine benchmark."
++                    : estimated
++                      ? "Output rate: Codex-reported turn output tokens, including reasoning and tool arguments, divided by estimated response-active time. Observed reasoning, text and plan windows exclude local tool, approval and input waits where visible. Silent reasoning, queue time and tool argument generation may be missed."
++                      : "Output rate: Claude-reported output tokens, including reasoning and tool arguments, divided by observed response start-to-stop time. Includes network, buffering and server-side waits; excludes local tool waits between responses."}
+                   {throughput?.partial && " Partial coverage: some activity could not be measured."}
+                 </p>
+               )}
+diff --git a/packages/client-runtime/src/state/orchestrationV2Projection.test.ts b/packages/client-runtime/src/state/orchestrationV2Projection.test.ts
+index e10316f9b..1e0b7eb7f 100644
+--- a/packages/client-runtime/src/state/orchestrationV2Projection.test.ts
++++ b/packages/client-runtime/src/state/orchestrationV2Projection.test.ts
+@@ -117,6 +117,7 @@ describe("applyOrchestrationV2ProjectionEvent", () => {
+       status: "running" as const,
+       startedAt: now,
+       completedAt: null,
++      responseTokenSpeed: { basis: "pi_token_speed_extension" as const, tokensPerSecond: 32.5 },
+       responseThroughput: {
+         basis: "codex_active_windows_estimate" as const,
+         outputTokens: 400,
+@@ -143,11 +144,22 @@ describe("applyOrchestrationV2ProjectionEvent", () => {
+         completedAt: now,
+         tokenUsage: undefined,
+         responseThroughput: undefined,
++        responseTokenSpeed: undefined,
+       },
+     } as OrchestrationV2DomainEvent;
+ 
+     const next = applyOrchestrationV2ProjectionEvent(projection, event);
+ 
++    expect(next?.providerTurns[0]?.responseTokenSpeed).toEqual(running.responseTokenSpeed);
++    const clearEvent = {
++      ...event,
++      payload: { ...event.payload, responseTokenSpeed: null },
++    } as OrchestrationV2DomainEvent;
++    const cleared = applyOrchestrationV2ProjectionEvent(next!, clearEvent);
++    expect(cleared?.providerTurns[0]?.responseTokenSpeed).toBeNull();
++    expect(
++      applyOrchestrationV2ProjectionEvent(cleared!, event)?.providerTurns[0]?.responseTokenSpeed,
++    ).toBeNull();
+     expect(next?.providerTurns[0]?.status).toBe("completed");
+     expect(next?.providerTurns[0]?.tokenUsage).toEqual(running.tokenUsage);
+     expect(next?.providerTurns[0]?.responseThroughput).toEqual(running.responseThroughput);
+diff --git a/packages/client-runtime/src/state/orchestrationV2Projection.ts b/packages/client-runtime/src/state/orchestrationV2Projection.ts
+index 7b95672dd..0a4059f1e 100644
+--- a/packages/client-runtime/src/state/orchestrationV2Projection.ts
++++ b/packages/client-runtime/src/state/orchestrationV2Projection.ts
+@@ -275,6 +275,16 @@ export function applyOrchestrationV2ProjectionEvent(
+           ...((event.payload.tokenUsage ?? current?.tokenUsage) === undefined
+             ? {}
+             : { tokenUsage: event.payload.tokenUsage ?? current?.tokenUsage }),
++          ...((event.payload.responseTokenSpeed !== undefined
++            ? event.payload.responseTokenSpeed
++            : current?.responseTokenSpeed) === undefined
++            ? {}
++            : {
++                responseTokenSpeed:
++                  event.payload.responseTokenSpeed !== undefined
++                    ? event.payload.responseTokenSpeed
++                    : current?.responseTokenSpeed,
++              }),
+           ...((event.payload.responseThroughput ?? current?.responseThroughput) === undefined
+             ? {}
+             : {
+diff --git a/packages/contracts/src/orchestrationV2.test.ts b/packages/contracts/src/orchestrationV2.test.ts
+index 7f8e33e6f..0cc36292d 100644
+--- a/packages/contracts/src/orchestrationV2.test.ts
++++ b/packages/contracts/src/orchestrationV2.test.ts
+@@ -1585,6 +1585,30 @@ describe("provider response throughput wire persistence", () => {
+   };
+   const codec = Schema.fromJsonString(OrchestrationV2ProviderTurnJson);
+   const decodeTurn = Schema.decodeUnknownSync(OrchestrationV2ProviderTurnJson);
++  it("round-trips Pi speed, explicit clear and missing historical telemetry", () => {
++    const encode = Schema.encodeSync(codec);
++    const decode = Schema.decodeUnknownSync(codec);
++    for (const responseTokenSpeed of [
++      null,
++      { basis: "pi_token_speed_extension" as const, tokensPerSecond: 32.5 },
++    ]) {
++      expect(decode(encode({ ...base, responseTokenSpeed })).responseTokenSpeed).toEqual(
++        responseTokenSpeed,
++      );
++    }
++    expect(decode(encode(base)).responseTokenSpeed).toBeUndefined();
++    for (const tokensPerSecond of [-1, NaN, Infinity]) {
++      expect(() =>
++        decodeTurn({
++          ...base,
++          responseTokenSpeed: { basis: "pi_token_speed_extension", tokensPerSecond },
++        }),
++      ).toThrow();
++    }
++    expect(() =>
++      decodeTurn({ ...base, responseTokenSpeed: { basis: "unknown", tokensPerSecond: 1 } }),
++    ).toThrow();
++  });
+   it("round-trips aggregates and reads historical payloads without inventing telemetry", () => {
+     const responseThroughput = {
+       outputTokens: 400,
+diff --git a/packages/contracts/src/orchestrationV2.ts b/packages/contracts/src/orchestrationV2.ts
+index afcf9100b..50e87fa2d 100644
+--- a/packages/contracts/src/orchestrationV2.ts
++++ b/packages/contracts/src/orchestrationV2.ts
+@@ -1089,6 +1089,15 @@ export const OrchestrationV2ProviderTurn = Schema.Struct({
+   completedAt: Schema.NullOr(Schema.DateTimeUtc),
+   tokenUsage: Schema.optional(OrchestrationV2ProviderTurnTokenUsage),
+   turnTokenUsage: Schema.optional(TurnTokenUsage),
++  /** Formatted Pi extension rate, separate from provider token/timing counters. Null clears it. */
++  responseTokenSpeed: Schema.optional(
++    Schema.NullOr(
++      Schema.Struct({
++        basis: Schema.Literal("pi_token_speed_extension"),
++        tokensPerSecond: Schema.Number.check(Schema.isFinite(), Schema.isGreaterThanOrEqualTo(0)),
++      }),
++    ),
++  ),
+   /** Provider output over response activity. Missing basis is legacy Claude observed telemetry. */
+   responseThroughput: Schema.optional(
+     Schema.Struct({
+diff --git a/packages/provider-pi/src/server/adapter.test.ts b/packages/provider-pi/src/server/adapter.test.ts
+index cab0043ab..7aaa4fa60 100644
+--- a/packages/provider-pi/src/server/adapter.test.ts
++++ b/packages/provider-pi/src/server/adapter.test.ts
+@@ -488,6 +488,85 @@ const expectModelFailure = (errorMessage: string) =>
+   }).pipe(Effect.scoped, Effect.provide(layerTest));
+ 
+ describe("PiAdapterV2", () => {
++  it.effect.each([false, true])(
++    "retains newest or cleared tokenSpeed reading at settlement, clear=%s",
++    (clear) =>
++      Effect.gen(function* () {
++        const fake = yield* makeFakePi;
++        const { runtime, takeEvent } = yield* openRuntime(fake);
++        const providerThread = yield* runtime.ensureThread({
++          threadId: THREAD_ID,
++          modelSelection: modelSelection("default"),
++          runtimePolicy,
++        });
++        yield* startTurn(runtime, providerThread);
++        yield* fake.takeRequest("prompt");
++        yield* fake.emit({ type: "agent_start" });
++        for (const [statusKey, statusText] of [
++          ["other", "TPS: 999 tok/s"],
++          ["tokenSpeed", "TPS: NaN tok/s"],
++          ["tokenSpeed", "⚡ TPS: 32.5 tok/s"],
++        ]) {
++          yield* fake.emit({
++            type: "extension_ui_request",
++            method: "setStatus",
++            statusKey,
++            statusText,
++          });
++        }
++        const live = yield* takeEvent(
++          (event) =>
++            event.type === "provider_turn.updated" &&
++            event.providerTurn.responseTokenSpeed !== undefined,
++        );
++        assert.isTrue(live.type === "provider_turn.updated");
++        if (live.type !== "provider_turn.updated") return;
++        assert.deepEqual(live.providerTurn.responseTokenSpeed, {
++          basis: "pi_token_speed_extension",
++          tokensPerSecond: 32.5,
++        });
++        // Throttled reading must still survive settlement.
++        yield* fake.emit({
++          type: "extension_ui_request",
++          method: "setStatus",
++          statusKey: "tokenSpeed",
++          statusText: "TPS: 40.0 tok/s",
++        });
++        if (clear) {
++          yield* fake.emit({
++            type: "extension_ui_request",
++            method: "setStatus",
++            statusKey: "tokenSpeed",
++          });
++          yield* takeEvent(
++            (event) =>
++              event.type === "provider_turn.updated" &&
++              event.providerTurn.responseTokenSpeed === null,
++          );
++        }
++        yield* fake.emit({ type: "agent_settled" });
++        const terminal = yield* takeEvent(
++          (event) =>
++            event.type === "provider_turn.updated" && event.providerTurn.status === "completed",
++        );
++        assert.isTrue(terminal.type === "provider_turn.updated");
++        if (terminal.type !== "provider_turn.updated") return;
++        assert.deepEqual(
++          terminal.providerTurn.responseTokenSpeed,
++          clear ? null : { basis: "pi_token_speed_extension", tokensPerSecond: 40 },
++        );
++        yield* takeEvent((event) => event.type === "turn.terminal");
++        yield* startTurn(runtime, providerThread, "default", [], "Next", undefined, 2);
++        const next = yield* takeEvent(
++          (event) =>
++            event.type === "provider_turn.updated" && event.providerTurn.status === "running",
++        );
++        assert.isTrue(next.type === "provider_turn.updated");
++        if (next.type === "provider_turn.updated")
++          assert.isUndefined(next.providerTurn.responseTokenSpeed);
++      }).pipe(Effect.scoped, Effect.provide(layerTest)),
++  );
++
+   it.effect.each([false, true])(
+     "serializes rollback fork hooks with native wake ownership, wake=%s",
+     (nativeWake) =>
+diff --git a/packages/provider-pi/src/server/adapter.ts b/packages/provider-pi/src/server/adapter.ts
+index 96d2783ec..fd6324e10 100644
+--- a/packages/provider-pi/src/server/adapter.ts
++++ b/packages/provider-pi/src/server/adapter.ts
+@@ -20,8 +20,8 @@
+  * Dialog methods become v2 runtime requests (`confirm` → approval_request,
+  * `select`/`input`/`editor` → user_input_request); answers travel back as
+  * `extension_ui_response`. `notify` becomes a completed activity item.
+- * Terminal-only decoration such as status, widget, title, and editor-text
+- * updates has no matching T3 surface and is ignored.
++ * pi-token-speed status updates feed Stats for nerds. Other terminal decoration
++ * such as status, widget, title, and editor-text updates is ignored.
+  */
+ import * as HostProcess from "@t3tools/shared/HostProcess";
+ import { AgentScope } from "@t3tools/shared/AgentScope";
+@@ -49,6 +49,7 @@ import {
+   type OrchestrationV2ProviderTurnTokenUsage,
+ } from "@t3tools/contracts";
+ import { PiSettings } from "../settings.ts";
++import { parsePiTokenSpeed } from "./tokenSpeed.ts";
+ import * as Cause from "effect/Cause";
+ import * as DateTime from "effect/DateTime";
+ import * as Deferred from "effect/Deferred";
+@@ -399,6 +400,8 @@ interface ActivePiTurn {
+   readonly turnInput: ProviderAdapter.ProviderAdapterV2TurnInput;
+   readonly providerTurn: OrchestrationV2ProviderTurn;
+   readonly startedAt: DateTime.Utc;
++  responseTokenSpeed?: OrchestrationV2ProviderTurn["responseTokenSpeed"];
++  lastTokenSpeedEmissionMs?: number;
+   readonly itemOrdinals: Map<string, number>;
+   nextItemOrdinal: number;
+   /** Increments on assistant `message_start` so content indexes stay unique. */
+@@ -1322,6 +1325,30 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
+         const method = recordString(event, "method");
+         const nativeRequestId = recordString(event, "id");
+         if (method === undefined) return;
++        if (method === "setStatus" && recordString(event, "statusKey") === "tokenSpeed") {
++          const turn = threadState?.activeTurn;
++          if (turn == null) return;
++          const speed = parsePiTokenSpeed(event["statusText"]);
++          if (speed === undefined) return;
++          turn.responseTokenSpeed = speed;
++          const now = yield* DateTime.now;
++          const nowMs = DateTime.toEpochMillis(now);
++          // Retain every reading for settlement, but bound live projection writes.
++          if (
++            speed !== null &&
++            turn.lastTokenSpeedEmissionMs !== undefined &&
++            nowMs - turn.lastTokenSpeedEmissionMs < 250
++          )
++            return;
++          turn.lastTokenSpeedEmissionMs = nowMs;
++          yield* emit({
++            type: "provider_turn.updated",
++            driver: PI_PROVIDER,
++            threadId: turn.turnInput.threadId,
++            providerTurn: { ...turn.providerTurn, responseTokenSpeed: speed },
++          });
++          return;
++        }
+         if (method === "notify") {
+           const state = threadState;
+           const turn = state?.activeTurn ?? null;
+@@ -1643,6 +1670,9 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
+             status: interrupted ? "interrupted" : failure !== null ? "failed" : "completed",
+             completedAt,
+             ...(tokenUsage === undefined ? {} : { tokenUsage }),
++            ...(turn.responseTokenSpeed === undefined
++              ? {}
++              : { responseTokenSpeed: turn.responseTokenSpeed }),
+           },
+         });
+         yield* updateProviderThread(
+diff --git a/packages/provider-pi/src/server/tokenSpeed.test.ts b/packages/provider-pi/src/server/tokenSpeed.test.ts
+new file mode 100644
+index 000000000..d5cd3d6f4
+--- /dev/null
++++ b/packages/provider-pi/src/server/tokenSpeed.test.ts
+@@ -0,0 +1,31 @@
++import { describe, expect, it } from "vite-plus/test";
++import { parsePiTokenSpeed } from "./tokenSpeed.ts";
++
++describe("pi-token-speed footer", () => {
++  it("reads the real ANSI footer including optional suffixes", () => {
++    expect(
++      parsePiTokenSpeed(
++        "⚡ \x1b[2mTPS:\x1b[0m \x1b[38;2;0;255;136m32.5 tok/s\x1b[0m (100 tok in 3.1s · TTFT: 50 ms)\u200b",
++      ),
++    ).toEqual({ basis: "pi_token_speed_extension", tokensPerSecond: 32.5 });
++    expect(parsePiTokenSpeed("TPS: 0.0 tok/s\u200b")?.tokensPerSecond).toBe(0);
++  });
++  it("distinguishes clear/placeholder from malformed updates", () => {
++    expect(parsePiTokenSpeed(undefined)).toBeNull();
++    expect(parsePiTokenSpeed("⚡ TPS: --")).toBeNull();
++    for (const text of [
++      "",
++      "TPS: -3 tok/s",
++      "TPS: NaN tok/s",
++      "TPS: Infinity tok/s",
++      "TPS: 1e20 tok/s",
++      "hello 35 tok/s",
++      "TPS: 35 tok/sec",
++      "TPS: 35 tok/sjunk",
++      35,
++      null,
++    ]) {
++      expect(parsePiTokenSpeed(text)).toBeUndefined();
++    }
++  });
++});
+diff --git a/packages/provider-pi/src/server/tokenSpeed.ts b/packages/provider-pi/src/server/tokenSpeed.ts
+new file mode 100644
+index 000000000..a2ccd18d3
+--- /dev/null
++++ b/packages/provider-pi/src/server/tokenSpeed.ts
+@@ -0,0 +1,17 @@
++import * as NodeUtil from "node:util";
++import type { OrchestrationV2ProviderTurn } from "@t3tools/contracts";
++
++/** Parse only pi-token-speed's footer, never infer counters from a formatted rate. */
++export function parsePiTokenSpeed(
++  text: unknown,
++): OrchestrationV2ProviderTurn["responseTokenSpeed"] {
++  if (text === undefined) return null;
++  if (typeof text !== "string" || text.length > 4096) return undefined;
++  const plain = NodeUtil.stripVTControlCharacters(text).replaceAll("\u200b", "").trim();
++  if (/(?:^|\s)TPS:\s*--$/.test(plain)) return null;
++  const match = /(?:^|\s)TPS:\s*(\d+(?:\.\d+)?)\s+tok\/s(?:\s|$)/.exec(plain);
++  if (!match) return undefined;
++  const tokensPerSecond = Number(match[1]);
++  if (!Number.isFinite(tokensPerSecond)) return undefined;
++  return { basis: "pi_token_speed_extension", tokensPerSecond };
++}

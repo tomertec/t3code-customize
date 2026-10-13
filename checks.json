@@ -14,7 +14,9 @@
     "packages/provider-core/src/server/managedProvider.test.ts",
     "apps/server/src/provider/ClaudeCapabilitiesProbe.test.ts",
     "apps/web/src/lib/contextWindow.test.ts",
-    "apps/server/src/provider/codexUsageLimits.test.ts"
+    "apps/server/src/provider/codexUsageLimits.test.ts",
+    "packages/provider-pi/src/server/tokenSpeed.test.ts",
+    "packages/provider-pi/src/server/adapter.test.ts"
   ],
   "typecheck": [
     "apps/server",
@@ -24,6 +26,7 @@
     "packages/provider-core",
     "packages/provider-cursor",
     "packages/provider-grok",
-    "packages/provider-opencode"
+    "packages/provider-opencode",
+    "packages/provider-pi"
   ]
 }

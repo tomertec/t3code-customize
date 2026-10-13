@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Tyler South <tsouth2@gmail.com>
 Date: Sat, 10 Oct 2026 12:40:14 -0400
-Subject: [PATCH 3/3] fix(web): show compaction settings and add a stats
+Subject: [PATCH 3/4] fix(web): show compaction settings and add a stats
  compact action
 
 ---
@@ -14,10 +14,10 @@ Subject: [PATCH 3/3] fix(web): show compaction settings and add a stats
  6 files changed, 317 insertions(+), 26 deletions(-)
 
 diff --git a/apps/web/src/components/ChatView.tsx b/apps/web/src/components/ChatView.tsx
-index 8a31a4bfd..774173d49 100644
+index 274c0f3cd..d3efd7745 100644
 --- a/apps/web/src/components/ChatView.tsx
 +++ b/apps/web/src/components/ChatView.tsx
-@@ -3644,23 +3644,49 @@ export default function ChatView(props: ChatViewProps) {
+@@ -3645,23 +3645,49 @@ export default function ChatView(props: ChatViewProps) {
      const usageLimits = activeUsageLimits
        ? { limits: activeUsageLimits, providerName: activeProviderName }
        : null;
@@ -72,7 +72,7 @@ index 8a31a4bfd..774173d49 100644
    const pendingBackgroundTasks = useMemo(() => {
      if (serverProjection === null || serverProjection === undefined) {
        return [];
-@@ -11961,7 +11987,23 @@ export default function ChatView(props: ChatViewProps) {
+@@ -11995,7 +12021,23 @@ export default function ChatView(props: ChatViewProps) {
                      </ComposerSurface.Shell>
                      {/* Opaque so timeline content scrolling under the overlay can't show through the stats line. */}
                      <div className={composerStats !== null ? "bg-background" : undefined}>

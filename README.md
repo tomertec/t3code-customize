@@ -187,3 +187,12 @@ python3 -m unittest discover -s tests -v
 ```
 
 The Python suite uses temporary app bundles to test backup/restore, interrupted replacement, version changes, idempotent install and command handling. On Windows run `python -m unittest discover -s tests -p test_windows.py -v`; macOS bundle durability tests require a Unix filesystem. `verify` applies the patches to `patches/base.txt` and runs every test and typecheck in `checks.json`. CI runs the shared suite on macOS and Linux, Windows lifecycle tests on Windows, and patch checks on Linux.
+
+### Pi local-model token speed
+
+Install the Pi extension in the same Pi environment used by T3:
+
+    pi install npm:pi-token-speed
+
+Restart Pi sessions after installing, then enable **Settings > General > Stats for nerds**.
+The customization forwards the extension's tokenSpeed footer into the main-agent stats line, including when Pi uses a local model. The rate carries an approximation mark: live values may count streaming chunks, and final values depend on extension settings and provider usage availability. T3 does not substitute whole-turn wall time or invent token counts when usage is absent. Claude and Codex retain their existing measurements. Pi sessions using the separately shipped WSL backend are outside this Windows customization.

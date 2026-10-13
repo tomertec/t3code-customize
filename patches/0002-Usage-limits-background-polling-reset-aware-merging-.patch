@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Tyler South <tsouth2@gmail.com>
 Date: Thu, 8 Oct 2026 22:05:20 -0400
-Subject: [PATCH 2/3] Usage limits: background polling, reset-aware merging and
+Subject: [PATCH 2/4] Usage limits: background polling, reset-aware merging and
  fetch-time ordering
 
 ---
@@ -95,7 +95,7 @@ index 8bc961834..197169bf7 100644
      resolveResetCredits &&
      capabilities.subscriptionType &&
 diff --git a/apps/server/src/provider/CodexProvider.ts b/apps/server/src/provider/CodexProvider.ts
-index 9ed238bf5..189e47d3c 100644
+index 7d4bbfdf5..ddf98064c 100644
 --- a/apps/server/src/provider/CodexProvider.ts
 +++ b/apps/server/src/provider/CodexProvider.ts
 @@ -57,6 +57,7 @@ const RATE_LIMITS_PROBE_TIMEOUT_MS = 3_000;
@@ -106,7 +106,7 @@ index 9ed238bf5..189e47d3c 100644
        readonly snapshot: CodexRateLimitSnapshot;
        readonly rateLimitsByLimitId?:
          | Readonly<Record<string, CodexRateLimitSnapshot>>
-@@ -533,12 +534,15 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
+@@ -515,12 +516,15 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
        input.skipNativeUsage
          ? Effect.succeed(undefined)
          : client.request("account/rateLimits/read", null).pipe(
@@ -128,7 +128,7 @@ index 9ed238bf5..189e47d3c 100644
              Effect.timeoutOption(Duration.millis(RATE_LIMITS_PROBE_TIMEOUT_MS)),
              Effect.map(
                Option.getOrElse((): CodexRateLimitsProbe => ({
-@@ -770,7 +774,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
+@@ -752,7 +756,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
              snapshot: snapshot.rateLimits.snapshot,
              rateLimitsByLimitId: snapshot.rateLimits.rateLimitsByLimitId,
              resetCredits: snapshot.rateLimits.resetCredits,
