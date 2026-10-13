@@ -13,5 +13,10 @@ if (-not (Test-Path -LiteralPath $entry)) {
     $entry = Join-Path $checkout 't3code-customize.ps1'
     if (-not (Test-Path -LiteralPath $entry)) { throw 'The downloaded branch does not contain Windows support yet. Use the prepared Windows package.' }
 }
-& $entry @args
+$installerArgs = @($args)
+$bundles = Join-Path $PSScriptRoot 'customized-bundles.zip'
+if ($installerArgs.Count -eq 0 -and (Test-Path -LiteralPath $bundles)) {
+    $installerArgs = @('install', '--bundles', $bundles, '--no-pull')
+}
+& $entry @installerArgs
 exit $LASTEXITCODE
