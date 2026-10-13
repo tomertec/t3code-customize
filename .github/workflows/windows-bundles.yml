@@ -1,0 +1,50 @@
+name: Build Windows customization bundles
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Exact installed T3 source commit
+        required: true
+      appVersion:
+        description: Exact installed T3 Nightly version
+        required: true
+      publicConfig:
+        description: Public Connect config JSON from the installed app
+        required: true
+        default: '{}'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      BUILD_COMMIT: ${{ inputs.commit }}
+      BUILD_VERSION: ${{ inputs.appVersion }}
+      BUILD_PUBLIC_CONFIG: ${{ inputs.publicConfig }}
+      NODE_OPTIONS: --max-old-space-size=6144
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Write public build config
+        run: python -c 'import os,pathlib; pathlib.Path("public-config.json").write_text(os.environ["BUILD_PUBLIC_CONFIG"])'
+      - name: Apply patches, run every check and build Windows JavaScript
+        run: python portable_build.py --commit "$BUILD_COMMIT" --version "$BUILD_VERSION" --config public-config.json --output artifacts/customized-bundles.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: t3code-windows-bundles
+          path: artifacts/customized-bundles.zip
+      - name: Retain build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build-log
+          path: ~/.cache/t3code-customize/portable-build.log

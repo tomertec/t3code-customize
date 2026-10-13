@@ -36,7 +36,7 @@ Subject: [PATCH 1/3] Stats for Nerds: response throughput and the composer
  create mode 100644 apps/web/src/components/chat/ComposerStats.tsx
 
 diff --git a/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts b/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts
-index 7652b5636..9852dd7b6 100644
+index 7460977ec..192e2ef69 100644
 --- a/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts
 +++ b/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts
 @@ -4,6 +4,7 @@ import * as NodeFS from "node:fs";
@@ -254,7 +254,7 @@ index 7652b5636..9852dd7b6 100644
      "projects Claude thinking blocks when %s",
      (status) =>
 diff --git a/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts b/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts
-index 80eb47436..ffd5b76c1 100644
+index 7199f7304..c0126e1d8 100644
 --- a/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts
 +++ b/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts
 @@ -1,3 +1,5 @@
@@ -274,7 +274,7 @@ index 80eb47436..ffd5b76c1 100644
              Stream.tap((message) =>
                logProtocolEvent({
                  direction: "incoming",
-@@ -2884,6 +2890,7 @@ function formatClaudeUsageLimitWait(waitMs: number): string {
+@@ -2893,6 +2899,7 @@ function formatClaudeUsageLimitWait(waitMs: number): string {
  }
  
  interface ActiveClaudeTurnContext {
@@ -282,7 +282,7 @@ index 80eb47436..ffd5b76c1 100644
    readonly input: ProviderAdapter.ProviderAdapterV2TurnInput;
    readonly nativeThreadId: string;
    readonly nativeTurnId: string;
-@@ -4142,6 +4149,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+@@ -4157,6 +4164,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
              return ordinal;
            });
  
@@ -291,7 +291,7 @@ index 80eb47436..ffd5b76c1 100644
          const providerTurnPayload = (input: {
            readonly context: ActiveClaudeTurnContext;
            readonly status: OrchestrationV2ProviderTurn["status"];
-@@ -4160,6 +4169,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+@@ -4175,6 +4184,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
            status: input.status,
            startedAt: input.context.startedAt,
            completedAt: input.completedAt,
@@ -301,7 +301,7 @@ index 80eb47436..ffd5b76c1 100644
          });
  
          const buildToolCallArtifacts = (input: {
-@@ -5847,6 +5859,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+@@ -5862,6 +5874,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                    failure: null,
                    threadDisposition,
                  };
@@ -309,7 +309,7 @@ index 80eb47436..ffd5b76c1 100644
            yield* Effect.all(
              [
                emitProviderEvent({
-@@ -6696,6 +6709,20 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+@@ -6711,6 +6724,20 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
            }
            yield* trackClaudeGoal({ nativeThreadId: liveQuery.nativeThreadId, context, message });
  
@@ -330,7 +330,7 @@ index 80eb47436..ffd5b76c1 100644
            // Subagent narration belongs to its child thread, never the parent log.
            if (message.type === "stream_event" && !message.parent_tool_use_id) {
              const event = message.event;
-@@ -8327,8 +8354,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+@@ -8361,8 +8388,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
            };
            yield* Ref.set(queryContext, context);
            yield* querySession.messages.pipe(
@@ -343,7 +343,7 @@ index 80eb47436..ffd5b76c1 100644
                  Effect.suspend(() => {
                    if (
                      message.type === "system" &&
-@@ -8339,8 +8368,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+@@ -8373,8 +8402,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                    }
                    return handleSdkMessage({ query: querySession, message });
                  }),
@@ -354,7 +354,7 @@ index 80eb47436..ffd5b76c1 100644
              Effect.exit,
              Effect.flatMap(
                Effect.fnUntraced(function* (exit: ClaudeQueryStreamExit) {
-@@ -8423,6 +8452,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+@@ -8457,6 +8486,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                goalsByNativeThread.set(nativeThreadId, turnInput.providerThread.goal ?? null);
              }
              const context: ActiveClaudeTurnContext = {
@@ -1021,7 +1021,7 @@ index 9a1c8f6c9..5aa1f23e6 100644
      Effect.scoped(
        Effect.gen(function* () {
 diff --git a/apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts b/apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts
-index 38e64af02..f8933540b 100644
+index d8ef1461e..9464c0550 100644
 --- a/apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts
 +++ b/apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts
 @@ -1,3 +1,4 @@
@@ -1029,15 +1029,15 @@ index 38e64af02..f8933540b 100644
  import { revertCodexThread } from "../../provider/CodexThreadRevert.ts";
  import { historyResponseItems } from "@t3tools/provider-core/server/handoffBudget";
  import { makeProviderTextDeltaCoalescer } from "./ProviderTextDeltaCoalescer.ts";
-@@ -17,6 +18,7 @@ import type { CodexEffectiveRuntime } from "../../provider/CodexManagedRuntime.t
- import { buildCodexInitializeParams } from "../../provider/CodexProvider.ts";
+@@ -20,6 +21,7 @@ import {
+ } from "../../provider/CodexProvider.ts";
  import {
    codexRateLimitsToUpdate,
 +  codexRateLimitsToLimits,
    mergeCodexRateLimits,
    codexUsageLimitResetAt,
    type CodexRateLimitSnapshot,
-@@ -59,6 +61,7 @@ import type {
+@@ -62,6 +64,7 @@ import type {
    ProviderThreadId,
    ProviderTurnId,
    ProviderInstanceId,
@@ -1045,7 +1045,7 @@ index 38e64af02..f8933540b 100644
    RuntimeMode,
    RuntimeRequestId,
    ThreadId,
-@@ -1102,6 +1105,7 @@ function codexErrorInfoCode(value: unknown): string | null {
+@@ -1105,6 +1108,7 @@ function codexErrorInfoCode(value: unknown): string | null {
  }
  
  interface ActiveCodexTurnContext {
@@ -1053,7 +1053,7 @@ index 38e64af02..f8933540b 100644
    latestProviderFailure?: {
      readonly nativeMessage: string;
      readonly failure: OrchestrationV2ProviderFailure;
-@@ -1566,7 +1570,10 @@ export type CodexAdapterV2DriverEnv =
+@@ -1569,7 +1573,10 @@ export type CodexAdapterV2DriverEnv =
  
  export const createCodexAdapterV2 = (
    { instanceId, environment, enabled, config }: ProviderAdapterDriverCreateInput<CodexSettings>,
@@ -1065,7 +1065,7 @@ index 38e64af02..f8933540b 100644
  ) =>
    Effect.gen(function* () {
      const clientFactory = yield* CodexAppServerClientFactory;
-@@ -1653,6 +1660,9 @@ const layer: Layer.Layer<
+@@ -1656,6 +1663,9 @@ const layer: Layer.Layer<
  );
  
  export interface CodexAdapterV2Options {
@@ -1075,7 +1075,7 @@ index 38e64af02..f8933540b 100644
    readonly instanceId: ProviderInstanceId;
    readonly settings: CodexSettings;
    readonly environment: NodeJS.ProcessEnv;
-@@ -1795,6 +1805,23 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
+@@ -1798,6 +1808,23 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
              yield* Ref.set(initialized, true);
            }),
          );
@@ -1099,7 +1099,7 @@ index 38e64af02..f8933540b 100644
          const now = yield* DateTime.now;
          const session = providerSession({
            providerSessionId: input.providerSessionId,
-@@ -1996,6 +2023,9 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
+@@ -1999,6 +2026,9 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                itemParentNodeId: input.turnInput.rootNodeId,
                rootNodeId: input.turnInput.rootNodeId,
                subagent: null,
@@ -1109,7 +1109,7 @@ index 38e64af02..f8933540b 100644
                startedAt: input.startedAt,
                itemPositions: new Map(),
              };
-@@ -3311,12 +3341,15 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
+@@ -3314,12 +3344,15 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
            return key;
          };
          const appendReasoning = Effect.fn("CodexAdapterV2.appendReasoning")(function* (
@@ -1126,7 +1126,7 @@ index 38e64af02..f8933540b 100644
            yield* completeProviderRetry(context, yield* DateTime.now);
            const itemId = reasoningPartKey(payload.turnId, payload.itemId, stream, index);
            // Reserve the position before the delayed flush, ahead of later tool items.
-@@ -4017,6 +4050,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
+@@ -4020,6 +4053,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
            readonly options?: ReadonlyArray<ProviderApprovalOption>;
          }) =>
            Effect.gen(function* () {
@@ -1134,7 +1134,7 @@ index 38e64af02..f8933540b 100644
              const createdAt = yield* DateTime.now;
              // A subagent's approval is asked on the top-level thread and run,
              // under the subagent that asked, where the user can see and answer it.
-@@ -4113,6 +4147,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
+@@ -4116,6 +4150,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
            readonly responseMode?: "message";
          }) =>
            Effect.gen(function* () {
@@ -1142,7 +1142,7 @@ index 38e64af02..f8933540b 100644
              const createdAt = yield* DateTime.now;
              const requestId = yield* idAllocator.allocate.runtimeRequest({
                driver: CODEX_PROVIDER,
-@@ -4202,10 +4237,16 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
+@@ -4205,10 +4240,16 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
              return { node, request, turnItem };
            });
  
@@ -1161,7 +1161,7 @@ index 38e64af02..f8933540b 100644
                yield* completeProviderRetry(context, yield* DateTime.now);
              }
              yield* agentMessageDeltas.append({
-@@ -4213,22 +4254,28 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
+@@ -4216,22 +4257,28 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                itemId: payload.itemId,
                delta: payload.delta,
              });
@@ -1196,7 +1196,7 @@ index 38e64af02..f8933540b 100644
              yield* completeProviderRetry(context, yield* DateTime.now);
              const markdown = `${planDeltas.get(payload.itemId) ?? ""}${payload.delta}`;
              planDeltas.set(payload.itemId, markdown);
-@@ -4253,15 +4300,17 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
+@@ -4256,15 +4303,17 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                driver: CODEX_PROVIDER,
                turnItem: artifacts.turnItem,
              });
@@ -1218,7 +1218,7 @@ index 38e64af02..f8933540b 100644
              yield* completeProviderRetry(context, yield* DateTime.now);
              const steps = payload.plan.map((step, index) => ({
                id: `step-${index + 1}`,
-@@ -4291,8 +4340,8 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
+@@ -4294,8 +4343,8 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                driver: CODEX_PROVIDER,
                turnItem: artifacts.turnItem,
              });
@@ -1229,7 +1229,7 @@ index 38e64af02..f8933540b 100644
  
          yield* client.handleServerNotification("account/rateLimits/updated", (payload) =>
            Effect.gen(function* () {
-@@ -4325,6 +4374,29 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
+@@ -4328,6 +4377,29 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
            }).pipe(Effect.orDie),
          );
  
@@ -1259,7 +1259,7 @@ index 38e64af02..f8933540b 100644
          yield* client.handleServerNotification("thread/tokenUsage/updated", (payload) =>
            Effect.gen(function* () {
              accumulateCodexTurnTokenUsage(
-@@ -4603,13 +4675,17 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
+@@ -4606,13 +4678,17 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
            });
          });
  
@@ -1279,7 +1279,7 @@ index 38e64af02..f8933540b 100644
              if (payload.item.type === "contextCompaction") {
                yield* emitCompactionItem(
                  context,
-@@ -4726,11 +4802,12 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
+@@ -4729,11 +4805,12 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                driver: CODEX_PROVIDER,
                turnItem: artifacts.turnItem,
              });
@@ -1296,7 +1296,7 @@ index 38e64af02..f8933540b 100644
              if (payload.item.type === "contextCompaction")
                // The notification callback runs on the input reader. Let it read
                // the injection response while the session-scoped request waits.
-@@ -4757,6 +4834,12 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
+@@ -4760,6 +4837,12 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                return;
              }
              const { context, settled } = resolved;
@@ -1309,7 +1309,7 @@ index 38e64af02..f8933540b 100644
  
              if (payload.item.type === "reasoning") {
                yield* completeReasoning(payload.turnId, payload.item);
-@@ -5043,8 +5126,8 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
+@@ -5046,8 +5129,8 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                  result: text,
                });
              }
@@ -1320,7 +1320,7 @@ index 38e64af02..f8933540b 100644
  
          yield* client.handleServerRequest("item/commandExecution/requestApproval", (payload) =>
            Effect.gen(function* () {
-@@ -5768,6 +5851,15 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
+@@ -5771,6 +5854,15 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                for (const [key, part] of reasoningParts) {
                  if (part.turnId === input.nativeTurnId) reasoningParts.delete(key);
                }
@@ -1336,7 +1336,7 @@ index 38e64af02..f8933540b 100644
                const nativeThreadId = input.context.providerThread.nativeThreadRef?.nativeId;
                // Codex continues an active goal with another turn, so the run stays
                // open and this turn reads as running until that turn starts.
-@@ -5794,14 +5886,8 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
+@@ -5797,14 +5889,8 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                  status: input.status,
                  startedAt: input.context.startedAt,
                  completedAt: input.completedAt,
@@ -1821,10 +1821,10 @@ index 4f10a0512..8621c74bc 100644
                      SELECT payload_json
                      FROM orchestration_v2_projection_provider_turns
 diff --git a/apps/web/src/components/ChatView.tsx b/apps/web/src/components/ChatView.tsx
-index 84f5b476a..f1cb8665e 100644
+index b760810a3..8a31a4bfd 100644
 --- a/apps/web/src/components/ChatView.tsx
 +++ b/apps/web/src/components/ChatView.tsx
-@@ -491,6 +491,8 @@ import { useLinkedThreadPullRequest } from "./ThreadStatusIndicators";
+@@ -492,6 +492,8 @@ import { useLinkedThreadPullRequest } from "./ThreadStatusIndicators";
  import type { ComposerBannerStackItem } from "./chat/ComposerBannerStack";
  import { ThreadStatusLine } from "./chat/ThreadStatusLine";
  import { formatRelativeTimeLabel, formatRelativeTimeUntilLabel } from "../timestampFormat";
@@ -1833,7 +1833,7 @@ index 84f5b476a..f1cb8665e 100644
  import { ComposerSurface } from "./chat/ComposerSurface";
  import { resolveThreadSyncPhase } from "../threadSync";
  import {
-@@ -3629,6 +3631,31 @@ export default function ChatView(props: ChatViewProps) {
+@@ -3634,6 +3636,31 @@ export default function ChatView(props: ChatViewProps) {
        ),
      [activeThreadLiveTokenUsage, serverVisibleTurnItems, serverProjection],
    );
@@ -1865,7 +1865,7 @@ index 84f5b476a..f1cb8665e 100644
    const pendingBackgroundTasks = useMemo(() => {
      if (serverProjection === null || serverProjection === undefined) {
        return [];
-@@ -11894,10 +11921,14 @@ export default function ChatView(props: ChatViewProps) {
+@@ -11932,10 +11959,14 @@ export default function ChatView(props: ChatViewProps) {
                          </div>
                        </div>
                      </ComposerSurface.Shell>
@@ -3133,7 +3133,7 @@ index 000000000..025f57253
 +  );
 +}
 diff --git a/apps/web/src/components/settings/SettingsPanels.tsx b/apps/web/src/components/settings/SettingsPanels.tsx
-index db1c7749e..ae1e709aa 100644
+index 131e85392..e0709cc1e 100644
 --- a/apps/web/src/components/settings/SettingsPanels.tsx
 +++ b/apps/web/src/components/settings/SettingsPanels.tsx
 @@ -620,6 +620,9 @@ export function useSettingsRestore(onRestored?: () => void) {
@@ -3162,7 +3162,7 @@ index db1c7749e..ae1e709aa 100644
        contextWindowMeterEnabled: DEFAULT_UNIFIED_SETTINGS.contextWindowMeterEnabled,
        environmentIdentificationMode: DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode,
        glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity,
-@@ -2792,6 +2797,32 @@ export function GeneralSettingsPanel() {
+@@ -2796,6 +2801,32 @@ export function GeneralSettingsPanel() {
            }
          />
  
@@ -3196,7 +3196,7 @@ index db1c7749e..ae1e709aa 100644
            {...searchableSetting("send-shortcut")}
            description="Choose when Enter sends a prompt or inserts a new line"
 diff --git a/apps/web/src/components/settings/settingsSearch.ts b/apps/web/src/components/settings/settingsSearch.ts
-index 798aabeb8..7302e5263 100644
+index 0ee55ef37..9514ddcf4 100644
 --- a/apps/web/src/components/settings/settingsSearch.ts
 +++ b/apps/web/src/components/settings/settingsSearch.ts
 @@ -453,6 +453,12 @@ export const SETTINGS_SEARCH_ITEMS = [
@@ -3400,7 +3400,7 @@ index 482249376..ce164b024 100644
  export type OrchestrationV2ProviderTurn = typeof OrchestrationV2ProviderTurn.Type;
  
 diff --git a/packages/contracts/src/settings.ts b/packages/contracts/src/settings.ts
-index e32572942..d9bfbde28 100644
+index c0de88f4a..f24bf5e61 100644
 --- a/packages/contracts/src/settings.ts
 +++ b/packages/contracts/src/settings.ts
 @@ -448,6 +448,7 @@ export const ClientSettingsSchema = Schema.Struct({
@@ -3411,7 +3411,7 @@ index e32572942..d9bfbde28 100644
    // Desktop resting composer: scrolling an existing thread's conversation
    // settles the composer into its single-line layout. Losing focus never does.
    composerCollapseOnScroll: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
-@@ -1636,6 +1637,7 @@ export const ClientSettingsPatch = Schema.Struct({
+@@ -1727,6 +1728,7 @@ export const ClientSettingsPatch = Schema.Struct({
    ),
    planModeEnabled: Schema.optionalKey(Schema.Boolean),
    contextWindowMeterEnabled: Schema.optionalKey(Schema.Boolean),

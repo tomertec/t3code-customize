@@ -9,7 +9,6 @@ T3 user data is never modified by the installer.
 """
 import argparse
 import copy
-import fcntl
 import hashlib
 import json
 import os
@@ -19,10 +18,19 @@ import shutil
 import struct
 import subprocess
 import sys
+import platform as host_platform
+import zipfile
+from concurrent.futures import ThreadPoolExecutor
+import threading
+if sys.platform == 'win32':
+    import msvcrt
+else:
+    import fcntl
 import tarfile
 import time
 import urllib.request
 import macos
+import windows
 
 NAME = 't3code-customize'
 REPO = Path(__file__).resolve().parent
@@ -32,6 +40,10 @@ SHARE = Path(os.environ.get('XDG_DATA_HOME') or HOME / '.local/share')
 DATA = SHARE / NAME
 CACHE = Path(os.environ.get('XDG_CACHE_HOME') or HOME / '.cache') / NAME
 CONFIG = Path(os.environ.get('XDG_CONFIG_HOME') or HOME / '.config') / NAME
+if sys.platform == 'win32':
+    DATA = Path(os.environ.get('LOCALAPPDATA', HOME / 'AppData/Local')) / NAME
+    CACHE = DATA / 'cache'
+    CONFIG = DATA / 'config'
 SOURCE = CACHE / 't3code'
 STATE = DATA / 'state.json'
 CURRENT = DATA / 'current'
@@ -81,9 +93,38 @@ def step(message):
 
 
 def run(args, cwd=None, env=None, log=None, check=True, capture=False):
-    result = subprocess.run(args, cwd=cwd, env=env, text=capture,
-                            stdout=subprocess.PIPE if capture else log,
-                            stderr=log if not capture else None)
+    command = args
+    if sys.platform == 'win32':
+        args = list(map(str, args))
+        executable = shutil.which(args[0], path=(env or os.environ).get('PATH'))
+        if executable:
+            args[0] = executable
+        if args[0].lower().endswith(('.cmd', '.bat')):
+            # cmd.exe handles pnpm/vp/tsc wrappers; list2cmdline preserves spaces.
+            command = subprocess.list2cmdline([os.environ.get('COMSPEC', 'cmd.exe'), '/d', '/s', '/c']) + ' "' + subprocess.list2cmdline(args) + '"'
+        else:
+            command = args
+    if sys.platform == 'win32' and log and not capture:
+        # Keep Windows stdout/stderr handles separate and drain them concurrently
+        # into the log without buffering entire builds.
+        mutex = threading.Lock()
+        def drain(stream):
+            for line in stream:
+                with mutex:
+                    log.write(line)
+                    log.flush()
+        with subprocess.Popen(command, cwd=cwd, env=env, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='replace') as child:
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                readers = [pool.submit(drain, child.stdout), pool.submit(drain, child.stderr)]
+                code = child.wait()
+                for reader in readers:
+                    reader.result()
+            result = subprocess.CompletedProcess(args, code)
+    else:
+        result = subprocess.run(command, cwd=cwd, env=env, text=capture,
+                                stdout=subprocess.PIPE if capture else log,
+                                stderr=log if not capture else None)
     if check and result.returncode:
         raise Stop(f'Command failed ({result.returncode}): {" ".join(map(str, args))}' + (f'\nLog: {log.name}' if log else ''))
     return result.stdout if capture else result
@@ -91,7 +132,7 @@ def run(args, cwd=None, env=None, log=None, check=True, capture=False):
 
 def git(*args, check=True, capture=True, log=None):
     env = {**os.environ, **GIT_ENV}
-    return run(['git', '-c', 'core.hooksPath=/dev/null', *args], cwd=SOURCE, env=env, check=check, capture=capture, log=log)
+    return run(['git', '-c', 'core.hooksPath=' + os.devnull, '-c', 'core.autocrlf=false', *args], cwd=SOURCE, env=env, check=check, capture=capture, log=log)
 
 
 def sha256(path):
@@ -119,8 +160,8 @@ def patches():
 
 def recipe_hash():
     digest = hashlib.sha256()
-    for path in patches() + [REPO / 'patches/base.txt', REPO / 'checks.json', REPO / NAME, REPO / 'macos.py']:
-        digest.update(path.name.encode() + path.read_bytes())
+    for path in patches() + [REPO / 'patches/base.txt', REPO / 'checks.json', REPO / NAME, REPO / 'macos.py', REPO / 'windows.py', REPO / 'wsl_build.py', REPO / 'portable_build.py']:
+        digest.update(path.name.encode() + path.read_bytes().replace(b'\r\n', b'\n'))
     return digest.hexdigest()[:12]
 
 
@@ -219,7 +260,7 @@ def read_public_config(archive):
     return {PUBLIC_CONFIG[name]: value for name, value in found.items()}
 
 
-def overlay(stock_path, output, build, config):
+def overlay(stock_path, output, build, config, prefixes=('apps/server/dist', 'apps/desktop/dist-electron')):
     """Write stock_path with the server and desktop bundles replaced by build's, then verify it."""
     stock = Archive(stock_path)
     try:
@@ -231,9 +272,10 @@ def overlay(stock_path, output, build, config):
                 current = current['files'][part]
             return current
 
-        node('apps/server/dist')['files']['client'] = {'files': {}}
+        if 'apps/server/dist' in prefixes:
+            node('apps/server/dist')['files']['client'] = {'files': {}}
         overlays = {}
-        for prefix in ('apps/server/dist', 'apps/desktop/dist-electron'):
+        for prefix in prefixes:
             source = build / prefix
             for path in sorted(source.rglob('*')):
                 if path.is_symlink():
@@ -253,6 +295,8 @@ def overlay(stock_path, output, build, config):
                 overlays[prefix + '/' + relative] = path
         for required in ('apps/server/dist/bin.mjs', 'apps/server/dist/client/index.html',
                          'apps/desktop/dist-electron/main.cjs'):
+            if not any(required.startswith(prefix + '/') for prefix in prefixes):
+                continue
             if required not in overlays:
                 raise Stop('The build did not produce ' + required)
         records, cursor = [], 0
@@ -283,10 +327,14 @@ def overlay(stock_path, output, build, config):
                 if not same:
                     raise Stop('Archive verification failed for stock entry ' + key)
             for prefix, marker in MARKERS:
+                if not any(prefix.startswith(p + '/') for p in prefixes):
+                    continue
                 if not any(marker in data for _, data in patched.scripts(prefix)):
                     raise Stop(f'The rebuilt bundle under {prefix} is missing the stats bar.')
             # Connect needs the same public config as stock in every bundle that carries it.
             for prefix in ('apps/server/dist/client/', 'apps/server/dist/', 'apps/desktop/dist-electron/'):
+                if not any(prefix.startswith(p + '/') for p in prefixes):
+                    continue
                 def contents(archive):
                     return b''.join(data for key, data in archive.scripts(prefix)
                                     if prefix.endswith('client/') or '/client/' not in key)
@@ -310,12 +358,14 @@ def node_major(node):
         return 0
 
 
+
 def node_target():
-    arch = {'x86_64': 'x64', 'aarch64': 'arm64', 'arm64': 'arm64'}.get(os.uname().machine)
-    platform = {'darwin': 'darwin', 'linux': 'linux'}.get(sys.platform)
+    machine = host_platform.machine() if sys.platform == 'win32' else os.uname().machine
+    arch = {'x86_64': 'x64', 'AMD64': 'x64', 'aarch64': 'arm64', 'ARM64': 'arm64', 'arm64': 'arm64'}.get(machine)
+    platform = {'darwin': 'darwin', 'linux': 'linux', 'win32': 'win'}.get(sys.platform)
     if not arch or not platform:
-        raise Stop('Node 24 or newer is required on a supported macOS or Linux architecture.')
-    return platform, arch, '.tar.gz' if platform == 'darwin' else '.tar.xz'
+        raise Stop('Node 24 or newer is required on a supported desktop architecture.')
+    return platform, arch, '.zip' if platform == 'win' else '.tar.gz' if platform == 'darwin' else '.tar.xz'
 
 
 def ensure_node(log):
@@ -324,17 +374,19 @@ def ensure_node(log):
     if system and node_major(system) >= 24:
         return None
     platform, arch, suffix = node_target()
-    private = sorted((CACHE / 'node').glob(f'node-v24.*-{platform}-{arch}'), key=version_key)
-    if private and node_major(str(private[-1] / 'bin/node')) >= 24:
-        return private[-1] / 'bin'
-    step('Downloading Node 24 (one time, private to this tool)...')
+    node_rel = 'node.exe' if platform == 'win' else 'bin/node'
+    major = 24
+    private = sorted((CACHE / 'node').glob(f'node-v{major}.*-{platform}-{arch}'), key=version_key)
+    if private and node_major(str(private[-1] / node_rel)) >= 24:
+        return private[-1] if platform == 'win' else private[-1] / 'bin'
+    step(f'Downloading Node {major} (one time, private to this tool)...')
     with urllib.request.urlopen('https://nodejs.org/dist/index.json', timeout=30) as response:
         releases = json.load(response)
-    index_target = f'osx-{arch}-tar' if platform == 'darwin' else f'{platform}-{arch}'
+    index_target = f'osx-{arch}-tar' if platform == 'darwin' else f'win-{arch}-zip' if platform == 'win' else f'{platform}-{arch}'
     version = next((r['version'] for r in releases
-                    if r['version'].startswith('v24.') and index_target in r['files']), None)
+                    if r['version'].startswith(f'v{major}.') and index_target in r['files']), None)
     if version is None:
-        raise Stop(f'No Node 24 download was published for {platform}/{arch}. Install Node 24 or newer and retry.')
+        raise Stop(f'No Node {major} download was published for {platform}/{arch}. Install Node {major} or newer and retry.')
     name = f'node-{version}-{platform}-{arch}'
     base = f'https://nodejs.org/dist/{version}/'
     with urllib.request.urlopen(base + 'SHASUMS256.txt', timeout=30) as response:
@@ -346,9 +398,16 @@ def ensure_node(log):
     if sha256(archive) != sums.get(archive.name):
         archive.unlink()
         raise Stop('The Node download did not match its published checksum.')
-    extract_tar(archive, folder)
+    if platform == 'win':
+        with zipfile.ZipFile(archive) as bundle:
+            for member in bundle.namelist():
+                if not (folder / member).resolve().is_relative_to(folder.resolve()):
+                    raise Stop('Unsafe path in Node download.')
+            bundle.extractall(folder)
+    else:
+        extract_tar(archive, folder)
     archive.unlink()
-    return folder / name / 'bin'
+    return folder / name if platform == 'win' else folder / name / 'bin'
 
 
 def build_env(node_bin):
@@ -430,6 +489,11 @@ def install_dependencies(env, log):
 
 
 def checks(env, log):
+    checked_head = git('rev-parse', 'HEAD').strip()
+    checked_spec = sha256(REPO / 'checks.json')
+    checked_lock = sha256(SOURCE / 'pnpm-lock.yaml')
+    if git('status', '--porcelain', '--untracked-files=no').strip():
+        raise Stop('Checks require clean source.')
     spec = json.loads((REPO / 'checks.json').read_text())
     missing = [t for t in spec['tests'] if not (SOURCE / t).exists()]
     if missing:
@@ -438,11 +502,21 @@ def checks(env, log):
     steps = [(['vp', 'test', 'run', *spec['tests']], 'The patch tests failed.')]
     steps += [(['tsc', '--noEmit', '-p', p + '/tsconfig.json'], f'Typecheck failed in {p}.') for p in spec['typecheck']]
     for args, message in steps:
-        if run(args, cwd=SOURCE, env=env, log=log, check=False).returncode:
-            raise NeedsFix(message + ' Command: ' + ' '.join(args))
+        step('Checking: ' + ' '.join(args))
+        result = run(args, cwd=SOURCE, env=env, log=log, check=False)
+        if result.returncode:
+            raise NeedsFix(message + f' Exit code: {result.returncode}. Command: ' + ' '.join(args))
+    if (git('rev-parse', 'HEAD').strip() != checked_head
+            or git('status', '--porcelain', '--untracked-files=no').strip()
+            or sha256(REPO / 'checks.json') != checked_spec
+            or sha256(SOURCE / 'pnpm-lock.yaml') != checked_lock):
+        raise Stop('Source or check specification changed during verification; no check cache recorded.')
+    save(CACHE / 'checks' / (checked_head + '.json'), {
+        'head': checked_head, 'spec': checked_spec,
+        'lock': checked_lock, 'platform': sys.platform})
 
 
-def build_bundles(env, version, stock_root, config, log):
+def build_bundles(env, version, stock_root, config, log, target_platform=None):
     step('Building T3 Code...')
     env = dict(env, APP_VERSION=version, TMPDIR=str(CACHE / 'tmp'), **config)
     Path(env['TMPDIR']).mkdir(parents=True, exist_ok=True)
@@ -460,7 +534,7 @@ def build_bundles(env, version, stock_root, config, log):
         brand = 'nightly' if 'nightly' in version else 'production'
         run(['node', 'scripts/apply-web-brand-assets.ts', brand, 'apps/server/dist/client'], cwd=SOURCE, env=env, log=log)
         # Reuse the native helper from your own app instead of compiling it.
-        arch = {'x86_64': 'x64', 'aarch64': 'arm64', 'arm64': 'arm64'}.get(os.uname().machine, 'x64')
+        arch = {'x86_64': 'x64', 'aarch64': 'arm64', 'arm64': 'arm64'}.get(host_platform.machine(), 'x64')
         helper = SOURCE / f'native/browser-secret/build/{arch}/t3-browser-secret'
         resources = stock_root / ('Contents/Resources' if sys.platform == 'darwin' else 'resources')
         stock_helper = resources / 'browser-secret/t3-browser-secret'
@@ -468,7 +542,8 @@ def build_bundles(env, version, stock_root, config, log):
             helper.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(stock_helper, helper)
             os.utime(helper, None)
-        run(['node', 'scripts/build-browser-secret.mjs'], cwd=SOURCE / 'apps/desktop', env=env, log=log)
+        if target_platform != 'win32':
+            run(['node', 'scripts/build-browser-secret.mjs'], cwd=SOURCE / 'apps/desktop', env=env, log=log)
         run(['node', 'scripts/build-preview-annotation-css.mjs'], cwd=SOURCE / 'apps/desktop', env=env, log=log)
         run(['vp', 'pack'], cwd=SOURCE / 'apps/desktop', env=env, log=log)
     finally:
@@ -789,13 +864,15 @@ def main():
 
     def build_options(p):
         p.add_argument('--appimage', help='path to your T3 Code AppImage (remembered)')
-        p.add_argument('--app', help='macOS T3 Code Nightly .app path (remembered)')
-        p.add_argument('--build-only', action='store_true', help='macOS: prepare a verified build without installing it')
+        p.add_argument('--app', help='macOS .app or Windows T3 Code install directory (remembered)')
+        p.add_argument('--build-only', action='store_true', help='macOS/Windows: prepare a verified build without installing it')
         p.add_argument('--fix', choices=sorted(AGENTS), help='if a nightly breaks the patches, let this agent port them without asking')
         p.add_argument('--resume', action='store_true', help='continue from the source checkout as you or your agent left it')
         p.add_argument('--skip-checks', action='store_true', help='skip the patch tests and typechecks')
         p.add_argument('--force', action='store_true', help='rebuild even if nothing changed')
         p.add_argument('--no-pull', action='store_true', help='do not fetch newer patches first')
+        p.add_argument('--wsl-distro', help='Windows: WSL distro for JavaScript builds (defaults to your default distro)')
+        p.add_argument('--bundles', help='Windows: checked customized-bundles.zip from the matching GitHub Actions build')
 
     build_options(sub.add_parser('build', help='update the patches and build (the default)'))
     build_options(sub.add_parser('install', help='build and install the customization'))
@@ -806,22 +883,32 @@ def main():
                                ('off', 'restore stock T3 Code'), ('restore', 'restore stock T3 Code'),
                                ('uninstall', 'restore stock and remove customization tooling')]:
         p = sub.add_parser(command, help=help_text)
-        p.add_argument('--app', help='macOS T3 Code Nightly .app path')
+        p.add_argument('--app', help='macOS .app or Windows T3 Code install directory')
     sub.add_parser('verify', help='apply the patches to their base and run the checks (for CI)')
     argv = sys.argv[1:]
     if not argv or argv[0].startswith('-') and argv[0] not in ('-h', '--help'):
         argv = ['build', *argv]
     args = parser.parse_args(argv)
     is_mac = sys.platform == 'darwin' and args.command != 'verify'
+    is_windows = sys.platform == 'win32' and args.command != 'verify'
     alias = {'install': 'build', 'reinstall': 'build', 'restore': 'off'}.get(args.command, args.command)
-    handler = (lambda a: macos.dispatch(a, sys.modules[__name__])) if is_mac else globals()['cmd_' + alias]
-    if not is_mac and args.command in ('launch', 'status', 'on', 'off', 'restore'):
+    handler = ((lambda a: windows.dispatch(a, sys.modules[__name__])) if is_windows else
+               (lambda a: macos.dispatch(a, sys.modules[__name__])) if is_mac else globals()['cmd_' + alias])
+    if not is_mac and not is_windows and args.command in ('launch', 'status', 'on', 'off', 'restore'):
         return handler(args)
     CACHE.mkdir(parents=True, exist_ok=True)
-    with (CACHE / 'lock').open('w') as lock:
+    with (CACHE / 'lock').open('a+b') as lock:
         try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
+            if sys.platform == 'win32':
+                lock.seek(0)
+                if not lock.read(1):
+                    lock.write(b'0')
+                    lock.flush()
+                lock.seek(0)
+                msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
             raise Stop(f'Another {NAME} is already running.')
         handler(args)
 
@@ -829,7 +916,7 @@ def main():
 if __name__ == '__main__':
     try:
         main()
-    except (Stop, macos.Error, OSError, subprocess.CalledProcessError) as stop:
+    except (Stop, macos.Error, windows.Error, OSError, subprocess.CalledProcessError) as stop:
         print(f'\n{stop}', file=sys.stderr)
         sys.exit(3 if isinstance(stop, NeedsFix) else 1)
     except KeyboardInterrupt:

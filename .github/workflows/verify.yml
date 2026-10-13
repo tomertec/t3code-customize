@@ -34,3 +34,15 @@ jobs:
       - name: Show the log on failure
         if: failure()
         run: tail -n 200 ~/.cache/t3code-customize/logs/*.log
+  windows-installer-tests:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - run: python -m unittest discover -s tests -p test_windows.py -v
+      - run: ./t3code-customize.ps1 install --help

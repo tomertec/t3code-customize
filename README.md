@@ -2,7 +2,7 @@
 
 Your 5 hour and weekly usage, context and tokens per second, right under the T3 Code composer.
 
-Unofficial. Not affiliated with T3 Tools. For T3 Code Nightly on macOS and Linux (AppImage).
+Unofficial. Not affiliated with T3 Tools. For T3 Code Nightly on Windows, macOS and Linux (AppImage).
 
 This fork adds macOS support to [btsouth/t3code-customize](https://github.com/btsouth/t3code-customize). macOS modifies the existing app with a full stock backup; Linux uses a separate customized launcher.
 
@@ -14,6 +14,56 @@ This fork adds macOS support to [btsouth/t3code-customize](https://github.com/bt
 - **Cache rate** for the last turn.
 
 The patches retain T3 Connect public configuration. The macOS signing and update differences are described below.
+
+## Install on Windows
+
+For a checked GitHub Actions build, download the **t3code-windows-bundles** artifact, extract it to get `customized-bundles.zip`, then quit T3 Code and run:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 install --bundles "C:\Downloads\customized-bundles.zip" --no-pull
+```
+
+This route needs Git for Windows and Python, and does not require WSL. The bundle must match your exact Nightly and the installer recipe. The installer verifies file hashes, feature markers, retained native files and public Connect config before applying it. The **Build Windows customization bundles** workflow builds at the provided installed commit/version and runs every check in `checks.json` before emitting the artifact. Only public Connect configuration belongs in its JSON input.
+
+### Build locally
+
+Extract the Windows package, open PowerShell in its directory, quit T3 Code fully, then run:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 install --no-pull
+```
+
+Open your existing T3 Code shortcut and enable **Settings > General > Stats for nerds**. Building requires Git for Windows, Python 3.9+, and WSL with a Linux distro containing Git and Python 3 (Ubuntu works). The JavaScript build runs on the Linux filesystem because the native Windows Vite toolchain crashes on the tested machine. It downloads a private Linux Node 24 runtime if needed. Applying a cached build needs only Windows Python; it does not change global Node or T3's shipped runtime. The initial source build can take 5–15 minutes; allow at least 6 GB plus archive backups and prepared builds. The execution-policy setting above applies only to that PowerShell process.
+
+To build while T3 Code is open:
+
+```powershell
+.\t3code-customize.ps1 install --build-only --no-pull
+# After the build finishes, quit T3 Code fully, then:
+.\t3code-customize.ps1 install --no-pull
+```
+
+The installer detects `%LOCALAPPDATA%\Programs\t3code`. For another location, provide `--app "C:\path\to\t3code"` once. It rebuilds for the installed app's exact source commit, supports separate desktop/server archives, preserves the executable and native helpers, and verifies backups and rebuilt archives. It never modifies T3 user data or closes running processes.
+
+It uses your default WSL distro. Select another with `--wsl-distro Ubuntu-24.04` on build/install/reinstall. The Linux build checkout is `~/.cache/t3code-customize/windows-build/source`; only compiled JavaScript is copied back to Windows. Required patch tests and typechecks run in that checkout, or reuse a successful Windows check result for the identical source commit, check specification and lockfile. WSL Node subprocesses have a 3 GB heap budget. If the local toolchain crashes, use the Actions bundle route above.
+
+This version customizes the **native Windows backend**. WSL sessions use T3's separate compiled Linux runtime, which is retained as shipped; the added metrics are not supported for those sessions.
+
+### Windows commands and updates
+
+```powershell
+.\t3code-customize.ps1 status
+.\t3code-customize.ps1 off       # restore stock before updating
+.\t3code-customize.ps1 reinstall # rebuild after an official Nightly update
+.\t3code-customize.ps1 on        # reapply a compatible build
+.\t3code-customize.ps1 uninstall # restore stock, remove this app's backups/builds
+```
+
+Quit T3 Code before applying or restoring archives. Restore stock with `off`, open T3 Code and update normally, then quit it and run `reinstall`. Automatic updates are disabled in the customized build. Some new Nightlies require porting the patches first; failed builds leave the installed app unchanged. `--skip-checks` is refused on Windows.
+
+Backups and prepared builds live under `%LOCALAPPDATA%\t3code-customize\windows\<app-path-id>`. An interrupted replacement keeps a recovery journal; quit the app and rerun `install` or `off`. Unknown changes, corrupt backups, and version mismatches stop recovery rather than overwrite your app. Do not delete recovery files while customized. The tool refuses executables that enforce embedded ASAR integrity; it never changes the executable or its Authenticode signature. Modified archives contain unofficial code.
+
+Uninstall retains source, tools, logs and installer scripts, including the WSL build cache. Keep the extracted package for future commands. The download/bootstrap form of `install.ps1` requires Windows support to be published to this repository; local packages work before publication.
 
 ## Install on macOS
 
@@ -120,7 +170,7 @@ t3code-customize uninstall   remove it, its launcher, builds and caches
 ## Good to know
 
 - **Bugs:** before reporting anything to T3 Code, run `t3code-customize off`, reopen and check it happens on stock too. Report customization problems here.
-- **Windows:** not supported. macOS is supported by this fork; see its workflow and signing limits above.
+- **Windows and macOS:** supported by this fork; see their update and recovery workflows above.
 - **Files:** builds live in `~/.local/share/t3code-customize`, the source checkout and logs in `~/.cache/t3code-customize`.
 
 ## License
@@ -134,4 +184,4 @@ python3 -m unittest discover -s tests -v
 ./t3code-customize verify
 ```
 
-The Python suite uses temporary app bundles to test backup/restore, interrupted replacement, version changes, idempotent install and command handling. `verify` applies the patches to `patches/base.txt` and runs every test and typecheck in `checks.json`. CI runs the Python suite on macOS and Linux and checks the patches on Linux.
+The Python suite uses temporary app bundles to test backup/restore, interrupted replacement, version changes, idempotent install and command handling. On Windows run `python -m unittest discover -s tests -p test_windows.py -v`; macOS bundle durability tests require a Unix filesystem. `verify` applies the patches to `patches/base.txt` and runs every test and typecheck in `checks.json`. CI runs the shared suite on macOS and Linux, Windows lifecycle tests on Windows, and patch checks on Linux.
