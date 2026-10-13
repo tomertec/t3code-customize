@@ -49,6 +49,8 @@ It uses your default WSL distro. Select another with `--wsl-distro Ubuntu-24.04`
 
 This version customizes the **native Windows backend**. WSL sessions use T3's separate compiled Linux runtime, which is retained as shipped; the added metrics are not supported for those sessions.
 
+The Windows preload disables V8's Maglev compiler in the desktop main process and native backend to avoid a reproduced startup crash with customized bundles. Other JIT compilation remains enabled. Restoring stock removes this workaround.
+
 ### Windows commands and updates
 
 ```powershell

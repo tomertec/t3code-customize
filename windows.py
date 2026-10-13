@@ -272,11 +272,18 @@ def restore(app, data):
 def stage_archives(stock, stage, build, config, tool):
     stage.mkdir(parents=True, exist_ok=True)
     boot = build / 'apps/desktop/dist-electron/boot.cjs'
+    cache = build / 'apps/desktop/dist-electron/compileCache.cjs'
     if not boot.is_file():
         raise Error('Desktop build did not produce boot.cjs.')
+    if not cache.is_file():
+        raise Error('Desktop build did not produce compileCache.cjs.')
     original = boot.read_bytes()
+    original_cache = cache.read_bytes()
     try:
         boot.write_bytes(MARKER + b'\nprocess.env.T3CODE_DISABLE_AUTO_UPDATE="true";\n' + original)
+        # Both boot.cjs and the native backend launcher load this before their
+        # large bundles. Avoid the reproduced Windows Maglev startup crash.
+        cache.write_bytes(b'if(process.platform==="win32")require("node:v8").setFlagsFromString("--no-maglev");\n' + original_cache)
         split = 'server.asar' in archives(stock)
         for name in archives(stock):
             prefixes = (('apps/desktop/dist-electron',) if name == 'app.asar' else
@@ -284,6 +291,7 @@ def stage_archives(stock, stage, build, config, tool):
             tool.overlay(stock / 'resources' / name, stage / name, build, config, prefixes=prefixes)
     finally:
         boot.write_bytes(original)
+        cache.write_bytes(original_cache)
 
 
 def build_with_wsl(args, tool, source_root, stock_source, config, log):

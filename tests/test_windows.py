@@ -131,6 +131,7 @@ class WindowsTests(unittest.TestCase):
             'apps/server/dist/client/index.html': b'web',
             'apps/server/dist/client/main.js': b'statsForNerds',
             'apps/desktop/dist-electron/main.cjs': b'statsForNerds',
+            'apps/desktop/dist-electron/compileCache.cjs': b'cache',
             'apps/desktop/dist-electron/boot.cjs': b'boot'}.items():
             p = build / name
             p.parent.mkdir(parents=True, exist_ok=True)
@@ -146,8 +147,10 @@ class WindowsTests(unittest.TestCase):
         a = tool.Archive(stage / 'app.asar')
         try:
             self.assertIn(b'T3CODE_DISABLE_AUTO_UPDATE', a.read('apps/desktop/dist-electron/boot.cjs'))
+            self.assertIn(b'--no-maglev', a.read('apps/desktop/dist-electron/compileCache.cjs'))
         finally:
             a.close()
+        self.assertEqual((build / 'apps/desktop/dist-electron/compileCache.cjs').read_bytes(), b'cache')
 
     def test_integrity_enabled_executable_is_rejected(self):
         (self.app / 'T3 Code (Nightly).exe').write_bytes(
