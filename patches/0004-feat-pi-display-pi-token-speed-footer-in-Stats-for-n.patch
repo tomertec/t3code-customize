@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Tomer Vaknin <tomer@tec.org.il>
 Date: Tue, 13 Oct 2026 16:31:44 +0300
-Subject: [PATCH 4/4] feat(pi): display pi-token-speed footer in Stats for
+Subject: [PATCH 4/6] feat(pi): display pi-token-speed footer in Stats for
  nerds
 
 ---

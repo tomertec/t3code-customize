@@ -1,0 +1,138 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tomer Vaknin <tomer@tec.org.il>
+Date: Wed, 14 Oct 2026 18:06:26 +0300
+Subject: [PATCH 6/6] feat(web): show context usage as a segmented meter in the
+ stats line
+
+The composer stats line reported context as a bare "6% context", which gives
+no sense of how close the window is to full without reading the number. Show a
+sixteen-block meter between the label and the percentage instead, lit from the
+same compaction pressure the percentage colour already uses, so window pressure
+reads at a glance.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+---
+ .../chat/ComposerStats.logic.test.ts          | 18 +++++++++
+ .../components/chat/ComposerStats.logic.ts    | 12 ++++++
+ .../web/src/components/chat/ComposerStats.tsx | 37 ++++++++++++++++---
+ 3 files changed, 62 insertions(+), 5 deletions(-)
+
+diff --git a/apps/web/src/components/chat/ComposerStats.logic.test.ts b/apps/web/src/components/chat/ComposerStats.logic.test.ts
+index 206eb9b42..b1ec1acec 100644
+--- a/apps/web/src/components/chat/ComposerStats.logic.test.ts
++++ b/apps/web/src/components/chat/ComposerStats.logic.test.ts
+@@ -14,6 +14,7 @@ import { describe, expect, it } from "vite-plus/test";
+ import {
+   composerLimitDisplay,
+   composerLimitsFreshness,
++  contextMeterFilledSegments,
+   deriveContextCompaction,
+   deriveResponseRate,
+   deriveTurnCachePercentage,
+@@ -569,3 +570,20 @@ describe("Pi extension speed", () => {
+     ).toBeNull();
+   });
+ });
++
++describe("contextMeterFilledSegments", () => {
++  it("lights no block below a reading and one for any usage at all", () => {
++    for (const percentage of [0, -5, Number.NaN, Number.NEGATIVE_INFINITY]) {
++      expect(contextMeterFilledSegments(percentage, 16)).toBe(0);
++    }
++    expect(contextMeterFilledSegments(0.2, 16)).toBe(1);
++    expect(contextMeterFilledSegments(6, 16)).toBe(1);
++  });
++  it("rounds up to the block a reading reaches and stops at the last one", () => {
++    expect(contextMeterFilledSegments(50, 16)).toBe(8);
++    expect(contextMeterFilledSegments(51, 16)).toBe(9);
++    expect(contextMeterFilledSegments(100, 16)).toBe(16);
++    expect(contextMeterFilledSegments(140, 16)).toBe(16);
++    expect(contextMeterFilledSegments(Number.POSITIVE_INFINITY, 16)).toBe(16);
++  });
++});
+diff --git a/apps/web/src/components/chat/ComposerStats.logic.ts b/apps/web/src/components/chat/ComposerStats.logic.ts
+index 7e6856ea4..b5231976f 100644
+--- a/apps/web/src/components/chat/ComposerStats.logic.ts
++++ b/apps/web/src/components/chat/ComposerStats.logic.ts
+@@ -306,3 +306,15 @@ export function deriveContextCompaction(
+               : "Not reported";
+   return { threshold, source, remainingTokens, thresholdPercentage, pressurePercentage, status };
+ }
++
++/**
++ * Blocks lit on the segmented context meter.
++ *
++ * Any usage at all lights the first block, so a nearly empty window still reads
++ * as started, and a reading rounds up to the block it reaches.
++ */
++export function contextMeterFilledSegments(percentage: number, segments: number): number {
++  if (Number.isNaN(percentage) || percentage <= 0) return 0;
++  const clamped = Math.min(100, percentage);
++  return Math.min(segments, Math.max(1, Math.ceil((clamped / 100) * segments)));
++}
+diff --git a/apps/web/src/components/chat/ComposerStats.tsx b/apps/web/src/components/chat/ComposerStats.tsx
+index 0d2672ff6..30abbfe7a 100644
+--- a/apps/web/src/components/chat/ComposerStats.tsx
++++ b/apps/web/src/components/chat/ComposerStats.tsx
+@@ -20,6 +20,7 @@ import {
+   composerLimitDisplay,
+   composerLimitSourceLabel,
+   composerLimitsFreshness,
++  contextMeterFilledSegments,
+   deriveContextCompaction,
+   deriveResponseRate,
+   deriveTurnCachePercentage,
+@@ -166,6 +167,26 @@ function Meter({
+   );
+ }
+ 
++const CONTEXT_METER_SEGMENTS = 16;
++
++/** The stats line's at-a-glance read on how full the window is, blocks lighting as it fills. */
++function ContextMeter({ percentage, pressure }: { percentage: number; pressure: number }) {
++  const tone = toneOf(pressure);
++  const filled = contextMeterFilledSegments(percentage, CONTEXT_METER_SEGMENTS);
++  return (
++    <span aria-hidden="true" className="inline-flex items-center gap-px">
++      {Array.from({ length: CONTEXT_METER_SEGMENTS }, (_, index) => (
++        <span
++          key={index}
++          className={`h-2 w-[3px] rounded-[1px] transition-colors duration-300 motion-reduce:transition-none ${
++            index < filled ? TONE_FILL[tone] : "bg-foreground/15"
++          }`}
++        />
++      ))}
++    </span>
++  );
++}
++
+ function formatUsageTimestamp(value: string | undefined): string {
+   if (value === undefined) return "unknown time";
+   const timeMs = Date.parse(value);
+@@ -514,15 +535,21 @@ export function ComposerStats({
+               />
+             }
+           >
+-            <span className="inline-flex items-center gap-1">
++            <span className="inline-flex items-center gap-1.5">
++              <Label>context</Label>
+               {context?.usedPercentage != null ? (
+-                <span className={TONE_TEXT[toneOf(compaction.pressurePercentage)]}>
+-                  {Math.round(context.usedPercentage)}%
+-                </span>
++                <>
++                  <ContextMeter
++                    percentage={context.usedPercentage}
++                    pressure={compaction.pressurePercentage}
++                  />
++                  <span className={TONE_TEXT[toneOf(compaction.pressurePercentage)]}>
++                    {Math.round(context.usedPercentage)}%
++                  </span>
++                </>
+               ) : (
+                 <Value>{context ? formatContextWindowTokens(context.usedTokens) : "—"}</Value>
+               )}
+-              <Label>context</Label>
+             </span>
+           </PopoverTrigger>
+           <PopoverPopup
