@@ -10,10 +10,10 @@ Subject: [PATCH 5/6] feat(web): add provider icons and accent colors to
  2 files changed, 118 insertions(+), 31 deletions(-)
 
 diff --git a/apps/web/src/components/ChatView.tsx b/apps/web/src/components/ChatView.tsx
-index d3efd7745..959d9637f 100644
+index a1cf80ba2..925926b2b 100644
 --- a/apps/web/src/components/ChatView.tsx
 +++ b/apps/web/src/components/ChatView.tsx
-@@ -12024,6 +12024,7 @@ export default function ChatView(props: ChatViewProps) {
+@@ -12050,6 +12050,7 @@ export default function ChatView(props: ChatViewProps) {
                        {composerStats !== null && (
                          <ComposerStats
                            {...composerStats}

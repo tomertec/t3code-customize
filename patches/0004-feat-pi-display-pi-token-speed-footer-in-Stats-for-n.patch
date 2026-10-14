@@ -23,10 +23,10 @@ Subject: [PATCH 4/6] feat(pi): display pi-token-speed footer in Stats for
  create mode 100644 packages/provider-pi/src/server/tokenSpeed.ts
 
 diff --git a/apps/server/src/orchestration-v2/ProjectionStore.test.ts b/apps/server/src/orchestration-v2/ProjectionStore.test.ts
-index 4ebbf378a..8152cdf46 100644
+index 356a0668e..85fc53c87 100644
 --- a/apps/server/src/orchestration-v2/ProjectionStore.test.ts
 +++ b/apps/server/src/orchestration-v2/ProjectionStore.test.ts
-@@ -684,7 +684,12 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
+@@ -747,7 +747,12 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
          nodeId,
          driver,
          occurredAt: now,
@@ -40,7 +40,7 @@ index 4ebbf378a..8152cdf46 100644
        });
        yield* projectionStore.apply({
          id: EventId.make("event:provider-usage-reload:without-usage"),
-@@ -696,6 +701,10 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
+@@ -759,6 +764,10 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
          payload: { ...providerTurn, status: "completed", completedAt: now },
        });
        const withoutUsage = yield* projectionStore.getThreadProjection(threadId);
@@ -51,7 +51,7 @@ index 4ebbf378a..8152cdf46 100644
        assert.deepEqual(withoutUsage.providerTurns[0]?.tokenUsage, initialUsage);
        assert.deepEqual(withoutUsage.providerTurns[0]?.responseThroughput, throughput);
  
-@@ -732,10 +741,12 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
+@@ -795,10 +804,12 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
            completedAt: now,
            tokenUsage: replacementUsage,
            responseThroughput: { ...throughput, partial: true },
@@ -65,10 +65,10 @@ index 4ebbf378a..8152cdf46 100644
        assert.deepEqual(replaced.providerTurns[0]?.responseThroughput, {
          ...throughput,
 diff --git a/apps/server/src/orchestration-v2/ProjectionStore.ts b/apps/server/src/orchestration-v2/ProjectionStore.ts
-index 8621c74bc..dd4eb2cd4 100644
+index 0ecd9baae..0b71a6989 100644
 --- a/apps/server/src/orchestration-v2/ProjectionStore.ts
 +++ b/apps/server/src/orchestration-v2/ProjectionStore.ts
-@@ -638,6 +638,16 @@ export function upsertProviderTurn(
+@@ -653,6 +653,16 @@ export function upsertProviderTurn(
      ...((next.tokenUsage ?? current?.tokenUsage) === undefined
        ? {}
        : { tokenUsage: next.tokenUsage ?? current?.tokenUsage }),
@@ -85,7 +85,7 @@ index 8621c74bc..dd4eb2cd4 100644
      ...((next.responseThroughput ?? current?.responseThroughput) === undefined
        ? {}
        : { responseThroughput: next.responseThroughput ?? current?.responseThroughput }),
-@@ -2264,7 +2274,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
+@@ -2297,7 +2307,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
            case "provider-turn.updated": {
              const existingRows =
                event.payload.tokenUsage === undefined ||
@@ -188,10 +188,10 @@ index 53b81a83a..6810e9cb3 100644
                  </p>
                )}
 diff --git a/packages/client-runtime/src/state/orchestrationV2Projection.test.ts b/packages/client-runtime/src/state/orchestrationV2Projection.test.ts
-index e10316f9b..1e0b7eb7f 100644
+index 103fe2d14..71fda0b63 100644
 --- a/packages/client-runtime/src/state/orchestrationV2Projection.test.ts
 +++ b/packages/client-runtime/src/state/orchestrationV2Projection.test.ts
-@@ -117,6 +117,7 @@ describe("applyOrchestrationV2ProjectionEvent", () => {
+@@ -146,6 +146,7 @@ describe("applyOrchestrationV2ProjectionEvent", () => {
        status: "running" as const,
        startedAt: now,
        completedAt: null,
@@ -199,7 +199,7 @@ index e10316f9b..1e0b7eb7f 100644
        responseThroughput: {
          basis: "codex_active_windows_estimate" as const,
          outputTokens: 400,
-@@ -143,11 +144,22 @@ describe("applyOrchestrationV2ProjectionEvent", () => {
+@@ -172,11 +173,22 @@ describe("applyOrchestrationV2ProjectionEvent", () => {
          completedAt: now,
          tokenUsage: undefined,
          responseThroughput: undefined,
@@ -223,10 +223,10 @@ index e10316f9b..1e0b7eb7f 100644
      expect(next?.providerTurns[0]?.tokenUsage).toEqual(running.tokenUsage);
      expect(next?.providerTurns[0]?.responseThroughput).toEqual(running.responseThroughput);
 diff --git a/packages/client-runtime/src/state/orchestrationV2Projection.ts b/packages/client-runtime/src/state/orchestrationV2Projection.ts
-index 7b95672dd..0a4059f1e 100644
+index 3bca7f70c..589605453 100644
 --- a/packages/client-runtime/src/state/orchestrationV2Projection.ts
 +++ b/packages/client-runtime/src/state/orchestrationV2Projection.ts
-@@ -275,6 +275,16 @@ export function applyOrchestrationV2ProjectionEvent(
+@@ -281,6 +281,16 @@ export function applyOrchestrationV2ProjectionEvent(
            ...((event.payload.tokenUsage ?? current?.tokenUsage) === undefined
              ? {}
              : { tokenUsage: event.payload.tokenUsage ?? current?.tokenUsage }),
@@ -279,7 +279,7 @@ index 7f8e33e6f..0cc36292d 100644
      const responseThroughput = {
        outputTokens: 400,
 diff --git a/packages/contracts/src/orchestrationV2.ts b/packages/contracts/src/orchestrationV2.ts
-index afcf9100b..50e87fa2d 100644
+index 4965452be..5bf53a44c 100644
 --- a/packages/contracts/src/orchestrationV2.ts
 +++ b/packages/contracts/src/orchestrationV2.ts
 @@ -1089,6 +1089,15 @@ export const OrchestrationV2ProviderTurn = Schema.Struct({
@@ -299,10 +299,10 @@ index afcf9100b..50e87fa2d 100644
    responseThroughput: Schema.optional(
      Schema.Struct({
 diff --git a/packages/provider-pi/src/server/adapter.test.ts b/packages/provider-pi/src/server/adapter.test.ts
-index cab0043ab..7aaa4fa60 100644
+index 98a956cc5..8c5178480 100644
 --- a/packages/provider-pi/src/server/adapter.test.ts
 +++ b/packages/provider-pi/src/server/adapter.test.ts
-@@ -488,6 +488,85 @@ const expectModelFailure = (errorMessage: string) =>
+@@ -512,6 +512,85 @@ const expectModelFailure = (errorMessage: string) =>
    }).pipe(Effect.scoped, Effect.provide(layerTest));
  
  describe("PiAdapterV2", () => {
@@ -386,10 +386,10 @@ index cab0043ab..7aaa4fa60 100644
 +  );
 +
    it.effect.each([false, true])(
-     "serializes rollback fork hooks with native wake ownership, wake=%s",
-     (nativeWake) =>
+     "completes a resumed user turn before native wake events arrive, Pi streaming=%s",
+     (streaming) =>
 diff --git a/packages/provider-pi/src/server/adapter.ts b/packages/provider-pi/src/server/adapter.ts
-index 96d2783ec..fd6324e10 100644
+index 722ac13b3..2d195da51 100644
 --- a/packages/provider-pi/src/server/adapter.ts
 +++ b/packages/provider-pi/src/server/adapter.ts
 @@ -20,8 +20,8 @@
