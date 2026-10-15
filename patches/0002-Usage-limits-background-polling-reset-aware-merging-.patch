@@ -28,7 +28,7 @@ Subject: [PATCH 2/6] Usage limits: background polling, reset-aware merging and
  20 files changed, 1771 insertions(+), 97 deletions(-)
 
 diff --git a/apps/server/src/provider/ClaudeCapabilitiesProbe.test.ts b/apps/server/src/provider/ClaudeCapabilitiesProbe.test.ts
-index d617eb999..f8ea5db48 100644
+index c294e2eba..c7c535ca1 100644
 --- a/apps/server/src/provider/ClaudeCapabilitiesProbe.test.ts
 +++ b/apps/server/src/provider/ClaudeCapabilitiesProbe.test.ts
 @@ -2,6 +2,7 @@
@@ -39,7 +39,7 @@ index d617eb999..f8ea5db48 100644
  import * as Fiber from "effect/Fiber";
  import * as TestClock from "effect/testing/TestClock";
  import {
-@@ -288,6 +289,7 @@ it.layer(NodeServices.layer)("Claude capability probe SDK boundary", (it) => {
+@@ -304,6 +305,7 @@ it.layer(NodeServices.layer)("Claude capability probe SDK boundary", (it) => {
              input: { hint: "[path]" },
            },
          ],
@@ -48,10 +48,10 @@ index d617eb999..f8ea5db48 100644
            rate_limits_available: true,
            rate_limits: { five_hour: { utilization: 12, resets_at: "2026-07-18T14:39:00Z" } },
 diff --git a/apps/server/src/provider/ClaudeProvider.ts b/apps/server/src/provider/ClaudeProvider.ts
-index 6d53c7c79..d360f5c32 100644
+index d53d86b12..07ddbb703 100644
 --- a/apps/server/src/provider/ClaudeProvider.ts
 +++ b/apps/server/src/provider/ClaudeProvider.ts
-@@ -284,6 +284,7 @@ type ClaudeCapabilitiesProbe = {
+@@ -287,6 +287,7 @@ type ClaudeCapabilitiesProbe = {
     * otherwise successful response mean the account has none (API key).
     */
    readonly usage?: Pick<SDKControlGetUsageResponse, "rate_limits_available" | "rate_limits">;
@@ -59,7 +59,7 @@ index 6d53c7c79..d360f5c32 100644
  };
  
  function parseClaudeInitializationCommands(
-@@ -437,7 +438,7 @@ const probeClaudeCapabilities = (
+@@ -442,7 +443,7 @@ const probeClaudeCapabilities = (
            apiKeySource: account?.apiKeySource,
            apiProvider: account?.apiProvider,
            slashCommands: parseClaudeInitializationCommands(init.commands),
@@ -68,7 +68,7 @@ index 6d53c7c79..d360f5c32 100644
          } satisfies ClaudeCapabilitiesProbe;
        }),
      ),
-@@ -657,14 +658,17 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
+@@ -662,14 +663,17 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
        subscriptionType: capabilities.subscriptionType,
        authMethod: capabilities.tokenSource,
      }) ?? apiProviderAuthMetadata(capabilities.apiProvider);

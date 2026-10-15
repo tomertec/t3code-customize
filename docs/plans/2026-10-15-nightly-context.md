@@ -11,3 +11,7 @@
 3. Update ComposerStats.tsx with a continuous rounded track, subtle quarter ticks, threshold marker, provider/warning tones, tabular percentage, and reduced-motion transitions. Keep existing segmented helper tests and all unrelated telemetry behavior.
 4. Fold the UI changes into the last patch commit with fixup/autosquash. Run all checks in checks.json using the installer resume workflow. Inspect the actual component in dark/light and narrow previews.
 5. Export patches for the new upstream base, prepare verified Windows archives with build --resume --build-only --no-pull, and leave the cached source clean. Report exact verification and installation status. If the local toolchain crashes, use the checked portable build route.
+
+Completed: all six patches target e6bbfdb9ffe8334bed1c9b992f828f04d30db7ea. The final source passed 791 tests in all 17 required files and all nine typechecks. Windows installer tests passed 25/25. The actual React component was inspected in Chrome in dark/light modes and at 360px, with no horizontal overflow; the Compact now callback remained functional. Independent source review found no blocking issues.
+
+The final build-only resume succeeded and verified app.asar and server.asar in prepared build 0888f2bc5285bf51e8df. The running installation was not changed. After a WSL stall, the successful retry used process-local GOMAXPROCS=4 and GOMEMLIMIT=4GiB; no VM settings or required checks changed.

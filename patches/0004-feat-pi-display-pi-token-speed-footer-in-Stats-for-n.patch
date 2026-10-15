@@ -23,10 +23,10 @@ Subject: [PATCH 4/6] feat(pi): display pi-token-speed footer in Stats for
  create mode 100644 packages/provider-pi/src/server/tokenSpeed.ts
 
 diff --git a/apps/server/src/orchestration-v2/ProjectionStore.test.ts b/apps/server/src/orchestration-v2/ProjectionStore.test.ts
-index 356a0668e..85fc53c87 100644
+index 73e2d73ac..84c043fe1 100644
 --- a/apps/server/src/orchestration-v2/ProjectionStore.test.ts
 +++ b/apps/server/src/orchestration-v2/ProjectionStore.test.ts
-@@ -747,7 +747,12 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
+@@ -834,7 +834,12 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
          nodeId,
          driver,
          occurredAt: now,
@@ -40,7 +40,7 @@ index 356a0668e..85fc53c87 100644
        });
        yield* projectionStore.apply({
          id: EventId.make("event:provider-usage-reload:without-usage"),
-@@ -759,6 +764,10 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
+@@ -846,6 +851,10 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
          payload: { ...providerTurn, status: "completed", completedAt: now },
        });
        const withoutUsage = yield* projectionStore.getThreadProjection(threadId);
@@ -51,7 +51,7 @@ index 356a0668e..85fc53c87 100644
        assert.deepEqual(withoutUsage.providerTurns[0]?.tokenUsage, initialUsage);
        assert.deepEqual(withoutUsage.providerTurns[0]?.responseThroughput, throughput);
  
-@@ -795,10 +804,12 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
+@@ -882,10 +891,12 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
            completedAt: now,
            tokenUsage: replacementUsage,
            responseThroughput: { ...throughput, partial: true },
@@ -65,10 +65,10 @@ index 356a0668e..85fc53c87 100644
        assert.deepEqual(replaced.providerTurns[0]?.responseThroughput, {
          ...throughput,
 diff --git a/apps/server/src/orchestration-v2/ProjectionStore.ts b/apps/server/src/orchestration-v2/ProjectionStore.ts
-index 0ecd9baae..0b71a6989 100644
+index 48ead899e..5540633ff 100644
 --- a/apps/server/src/orchestration-v2/ProjectionStore.ts
 +++ b/apps/server/src/orchestration-v2/ProjectionStore.ts
-@@ -653,6 +653,16 @@ export function upsertProviderTurn(
+@@ -685,6 +685,16 @@ export function upsertProviderTurn(
      ...((next.tokenUsage ?? current?.tokenUsage) === undefined
        ? {}
        : { tokenUsage: next.tokenUsage ?? current?.tokenUsage }),
@@ -85,7 +85,7 @@ index 0ecd9baae..0b71a6989 100644
      ...((next.responseThroughput ?? current?.responseThroughput) === undefined
        ? {}
        : { responseThroughput: next.responseThroughput ?? current?.responseThroughput }),
-@@ -2297,7 +2307,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
+@@ -2329,7 +2339,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
            case "provider-turn.updated": {
              const existingRows =
                event.payload.tokenUsage === undefined ||
@@ -279,7 +279,7 @@ index 7f8e33e6f..0cc36292d 100644
      const responseThroughput = {
        outputTokens: 400,
 diff --git a/packages/contracts/src/orchestrationV2.ts b/packages/contracts/src/orchestrationV2.ts
-index 4965452be..5bf53a44c 100644
+index 70cbde81b..e7d15409b 100644
 --- a/packages/contracts/src/orchestrationV2.ts
 +++ b/packages/contracts/src/orchestrationV2.ts
 @@ -1089,6 +1089,15 @@ export const OrchestrationV2ProviderTurn = Schema.Struct({
