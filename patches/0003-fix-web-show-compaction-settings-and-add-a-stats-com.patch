@@ -14,10 +14,10 @@ Subject: [PATCH 3/6] fix(web): show compaction settings and add a stats
  6 files changed, 317 insertions(+), 26 deletions(-)
 
 diff --git a/apps/web/src/components/ChatView.tsx b/apps/web/src/components/ChatView.tsx
-index 3b66c0023..2bcddefbb 100644
+index b17e5bc84..f09f1e12c 100644
 --- a/apps/web/src/components/ChatView.tsx
 +++ b/apps/web/src/components/ChatView.tsx
-@@ -3730,23 +3730,49 @@ export default function ChatView(props: ChatViewProps) {
+@@ -2631,23 +2631,49 @@ export default function ChatView(props: ChatViewProps) {
      const usageLimits = activeUsageLimits
        ? { limits: activeUsageLimits, providerName: activeProviderName }
        : null;
@@ -69,10 +69,10 @@ index 3b66c0023..2bcddefbb 100644
 +    activeUsageLimits,
 +    activeProviderName,
 +  ]);
-   const pendingBackgroundTasks = useMemo(() => {
+   const pendingBackgroundTasks = (() => {
      if (serverProjection === null || serverProjection === undefined) {
        return [];
-@@ -11747,7 +11773,23 @@ export default function ChatView(props: ChatViewProps) {
+@@ -8562,7 +8588,23 @@ export default function ChatView(props: ChatViewProps) {
                      </ComposerSurface.Shell>
                      {/* Opaque so timeline content scrolling under the overlay can't show through the stats line. */}
                      <div className={composerStats !== null ? "bg-background" : undefined}>
@@ -452,7 +452,7 @@ index 025f57253..53b81a83a 100644
                  <p className="text-muted-foreground">
                    Reported{" "}
 diff --git a/apps/web/src/lib/contextWindow.test.ts b/apps/web/src/lib/contextWindow.test.ts
-index 2847b23ca..d32601f98 100644
+index e672c36c1..1f92cc186 100644
 --- a/apps/web/src/lib/contextWindow.test.ts
 +++ b/apps/web/src/lib/contextWindow.test.ts
 @@ -8,7 +8,7 @@ import {
@@ -497,7 +497,7 @@ index 2847b23ca..d32601f98 100644
    });
  
    it("prefers current provider usage and preserves ACP cost", () => {
-@@ -110,3 +120,39 @@ describe("latestProviderTurnTokenUsage", () => {
+@@ -109,3 +119,39 @@ describe("latestProviderTurnTokenUsage", () => {
      expect(latest?.usedTokens).toBe(300_000);
    });
  });
@@ -538,10 +538,10 @@ index 2847b23ca..d32601f98 100644
 +  });
 +});
 diff --git a/apps/web/src/lib/contextWindow.ts b/apps/web/src/lib/contextWindow.ts
-index 33f59c3ea..1eca0df91 100644
+index e64525e7e..5bad05664 100644
 --- a/apps/web/src/lib/contextWindow.ts
 +++ b/apps/web/src/lib/contextWindow.ts
-@@ -74,8 +74,8 @@ export function deriveLatestContextWindowSnapshot(
+@@ -73,8 +73,8 @@ export function deriveLatestContextWindowSnapshot(
        lastReasoningOutputTokens: null,
        toolUses: null,
        durationMs: null,
@@ -552,7 +552,7 @@ index 33f59c3ea..1eca0df91 100644
        cost: null,
        updatedAt: liveUsage.updatedAt,
      };
-@@ -117,7 +117,7 @@ export function deriveLatestContextWindowSnapshot(
+@@ -116,7 +116,7 @@ export function deriveLatestContextWindowSnapshot(
    }
    for (let index = entries.length - 1; index >= 0; index -= 1) {
      const entry = entries[index];
@@ -561,7 +561,7 @@ index 33f59c3ea..1eca0df91 100644
        continue;
      }
      const payload = entry.item;
-@@ -135,7 +135,7 @@ export function deriveLatestContextWindowSnapshot(
+@@ -134,7 +134,7 @@ export function deriveLatestContextWindowSnapshot(
  
      return {
        usedTokens,
@@ -570,7 +570,7 @@ index 33f59c3ea..1eca0df91 100644
        maxTokens,
        remainingTokens,
        usedPercentage,
-@@ -151,10 +151,10 @@ export function deriveLatestContextWindowSnapshot(
+@@ -150,10 +150,10 @@ export function deriveLatestContextWindowSnapshot(
        lastReasoningOutputTokens: null,
        toolUses: null,
        durationMs: null,

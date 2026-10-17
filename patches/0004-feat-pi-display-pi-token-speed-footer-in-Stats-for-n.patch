@@ -15,18 +15,18 @@ Subject: [PATCH 4/6] feat(pi): display pi-token-speed footer in Stats for
  .../contracts/src/orchestrationV2.test.ts     | 24 ++++++
  packages/contracts/src/orchestrationV2.ts     |  9 +++
  .../provider-pi/src/server/adapter.test.ts    | 79 +++++++++++++++++++
- packages/provider-pi/src/server/adapter.ts    | 34 +++++++-
+ packages/provider-pi/src/server/adapter.ts    | 55 +++++++++++++
  .../provider-pi/src/server/tokenSpeed.test.ts | 31 ++++++++
  packages/provider-pi/src/server/tokenSpeed.ts | 17 ++++
- 13 files changed, 289 insertions(+), 8 deletions(-)
+ 13 files changed, 312 insertions(+), 6 deletions(-)
  create mode 100644 packages/provider-pi/src/server/tokenSpeed.test.ts
  create mode 100644 packages/provider-pi/src/server/tokenSpeed.ts
 
 diff --git a/apps/server/src/orchestration-v2/ProjectionStore.test.ts b/apps/server/src/orchestration-v2/ProjectionStore.test.ts
-index 73e2d73ac..84c043fe1 100644
+index 6d605a963..23379df64 100644
 --- a/apps/server/src/orchestration-v2/ProjectionStore.test.ts
 +++ b/apps/server/src/orchestration-v2/ProjectionStore.test.ts
-@@ -834,7 +834,12 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
+@@ -1014,7 +1014,12 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
          nodeId,
          driver,
          occurredAt: now,
@@ -40,7 +40,7 @@ index 73e2d73ac..84c043fe1 100644
        });
        yield* projectionStore.apply({
          id: EventId.make("event:provider-usage-reload:without-usage"),
-@@ -846,6 +851,10 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
+@@ -1026,6 +1031,10 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
          payload: { ...providerTurn, status: "completed", completedAt: now },
        });
        const withoutUsage = yield* projectionStore.getThreadProjection(threadId);
@@ -51,7 +51,7 @@ index 73e2d73ac..84c043fe1 100644
        assert.deepEqual(withoutUsage.providerTurns[0]?.tokenUsage, initialUsage);
        assert.deepEqual(withoutUsage.providerTurns[0]?.responseThroughput, throughput);
  
-@@ -882,10 +891,12 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
+@@ -1062,10 +1071,12 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
            completedAt: now,
            tokenUsage: replacementUsage,
            responseThroughput: { ...throughput, partial: true },
@@ -65,10 +65,10 @@ index 73e2d73ac..84c043fe1 100644
        assert.deepEqual(replaced.providerTurns[0]?.responseThroughput, {
          ...throughput,
 diff --git a/apps/server/src/orchestration-v2/ProjectionStore.ts b/apps/server/src/orchestration-v2/ProjectionStore.ts
-index 48ead899e..5540633ff 100644
+index 74913f118..77b89ed81 100644
 --- a/apps/server/src/orchestration-v2/ProjectionStore.ts
 +++ b/apps/server/src/orchestration-v2/ProjectionStore.ts
-@@ -685,6 +685,16 @@ export function upsertProviderTurn(
+@@ -651,6 +651,16 @@ export function upsertProviderTurn(
      ...((next.tokenUsage ?? current?.tokenUsage) === undefined
        ? {}
        : { tokenUsage: next.tokenUsage ?? current?.tokenUsage }),
@@ -85,7 +85,7 @@ index 48ead899e..5540633ff 100644
      ...((next.responseThroughput ?? current?.responseThroughput) === undefined
        ? {}
        : { responseThroughput: next.responseThroughput ?? current?.responseThroughput }),
-@@ -2329,7 +2339,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
+@@ -2295,7 +2305,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
            case "provider-turn.updated": {
              const existingRows =
                event.payload.tokenUsage === undefined ||
@@ -188,7 +188,7 @@ index 53b81a83a..6810e9cb3 100644
                  </p>
                )}
 diff --git a/packages/client-runtime/src/state/orchestrationV2Projection.test.ts b/packages/client-runtime/src/state/orchestrationV2Projection.test.ts
-index 103fe2d14..71fda0b63 100644
+index 019239a72..aae9cb96c 100644
 --- a/packages/client-runtime/src/state/orchestrationV2Projection.test.ts
 +++ b/packages/client-runtime/src/state/orchestrationV2Projection.test.ts
 @@ -146,6 +146,7 @@ describe("applyOrchestrationV2ProjectionEvent", () => {
@@ -223,10 +223,10 @@ index 103fe2d14..71fda0b63 100644
      expect(next?.providerTurns[0]?.tokenUsage).toEqual(running.tokenUsage);
      expect(next?.providerTurns[0]?.responseThroughput).toEqual(running.responseThroughput);
 diff --git a/packages/client-runtime/src/state/orchestrationV2Projection.ts b/packages/client-runtime/src/state/orchestrationV2Projection.ts
-index 3bca7f70c..589605453 100644
+index 065caf434..0720fb9c6 100644
 --- a/packages/client-runtime/src/state/orchestrationV2Projection.ts
 +++ b/packages/client-runtime/src/state/orchestrationV2Projection.ts
-@@ -281,6 +281,16 @@ export function applyOrchestrationV2ProjectionEvent(
+@@ -279,6 +279,16 @@ export function applyOrchestrationV2ProjectionEvent(
            ...((event.payload.tokenUsage ?? current?.tokenUsage) === undefined
              ? {}
              : { tokenUsage: event.payload.tokenUsage ?? current?.tokenUsage }),
@@ -244,10 +244,10 @@ index 3bca7f70c..589605453 100644
              ? {}
              : {
 diff --git a/packages/contracts/src/orchestrationV2.test.ts b/packages/contracts/src/orchestrationV2.test.ts
-index 7f8e33e6f..0cc36292d 100644
+index 38d7959a6..1c2370192 100644
 --- a/packages/contracts/src/orchestrationV2.test.ts
 +++ b/packages/contracts/src/orchestrationV2.test.ts
-@@ -1585,6 +1585,30 @@ describe("provider response throughput wire persistence", () => {
+@@ -1571,6 +1571,30 @@ describe("provider response throughput wire persistence", () => {
    };
    const codec = Schema.fromJsonString(OrchestrationV2ProviderTurnJson);
    const decodeTurn = Schema.decodeUnknownSync(OrchestrationV2ProviderTurnJson);
@@ -279,10 +279,10 @@ index 7f8e33e6f..0cc36292d 100644
      const responseThroughput = {
        outputTokens: 400,
 diff --git a/packages/contracts/src/orchestrationV2.ts b/packages/contracts/src/orchestrationV2.ts
-index 70cbde81b..e7d15409b 100644
+index c9eb3b8f3..dbc516e35 100644
 --- a/packages/contracts/src/orchestrationV2.ts
 +++ b/packages/contracts/src/orchestrationV2.ts
-@@ -1089,6 +1089,15 @@ export const OrchestrationV2ProviderTurn = Schema.Struct({
+@@ -982,6 +982,15 @@ export const OrchestrationV2ProviderTurn = Schema.Struct({
    completedAt: Schema.NullOr(Schema.DateTimeUtc),
    tokenUsage: Schema.optional(OrchestrationV2ProviderTurnTokenUsage),
    turnTokenUsage: Schema.optional(TurnTokenUsage),
@@ -299,10 +299,10 @@ index 70cbde81b..e7d15409b 100644
    responseThroughput: Schema.optional(
      Schema.Struct({
 diff --git a/packages/provider-pi/src/server/adapter.test.ts b/packages/provider-pi/src/server/adapter.test.ts
-index 98a956cc5..8c5178480 100644
+index 78876fcfa..e736bf7ef 100644
 --- a/packages/provider-pi/src/server/adapter.test.ts
 +++ b/packages/provider-pi/src/server/adapter.test.ts
-@@ -512,6 +512,85 @@ const expectModelFailure = (errorMessage: string) =>
+@@ -490,6 +490,85 @@ const expectModelFailure = (errorMessage: string) =>
    }).pipe(Effect.scoped, Effect.provide(layerTest));
  
  describe("PiAdapterV2", () => {
@@ -389,21 +389,39 @@ index 98a956cc5..8c5178480 100644
      "completes a resumed user turn before native wake events arrive, Pi streaming=%s",
      (streaming) =>
 diff --git a/packages/provider-pi/src/server/adapter.ts b/packages/provider-pi/src/server/adapter.ts
-index 722ac13b3..2d195da51 100644
+index 25c398424..195fb8a0b 100644
 --- a/packages/provider-pi/src/server/adapter.ts
 +++ b/packages/provider-pi/src/server/adapter.ts
-@@ -20,8 +20,8 @@
-  * Dialog methods become v2 runtime requests (`confirm` → approval_request,
-  * `select`/`input`/`editor` → user_input_request); answers travel back as
-  * `extension_ui_response`. `notify` becomes a completed activity item.
-- * Terminal-only decoration such as status, widget, title, and editor-text
-- * updates has no matching T3 surface and is ignored.
+@@ -1,3 +1,28 @@
++/**
++ * PiAdapterV2 — orchestrator-v2 adapter for the Pi coding agent
++ * (https://pi.dev), driving `pi --mode rpc` over stdio JSONL via `PiRpc.ts`.
++ *
++ * Design intent: honor the user's Pi customizations. The process is spawned
++ * with no `--no-*` flags, so the user's extensions, skills, prompt templates,
++ * AGENTS.md / SYSTEM.md context, settings.json, custom models, and auth all
++ * load exactly as they do in the `pi` TUI. Sessions are stored by Pi itself
++ * (default `~/.pi/agent/sessions/`), and the session file path is the durable
++ * `nativeThreadRef`, so a thread started in T3 can be resumed from the TUI
++ * and vice versa.
++ *
++ * Turn lifecycle: `agent_settled` is the only terminal signal. `agent_end`
++ * merely closes one low-level run — compaction retries, auto-retries, and
++ * queued continuations may still follow it, so the turn stays open until Pi
++ * reports the session settled. An extension can start detached compaction as
++ * that signal unwinds, so the adapter confirms Pi is idle before terminalizing.
++ *
++ * Extension UI: Pi extensions raise dialogs through `extension_ui_request`.
++ * Dialog methods become v2 runtime requests (`confirm` → approval_request,
++ * `select`/`input`/`editor` → user_input_request); answers travel back as
++ * `extension_ui_response`. `notify` becomes a completed activity item.
 + * pi-token-speed status updates feed Stats for nerds. Other terminal decoration
 + * such as status, widget, title, and editor-text updates is ignored.
-  */
++ */
  import * as HostProcess from "@t3tools/shared/HostProcess";
  import { AgentScope } from "@t3tools/shared/AgentScope";
-@@ -49,6 +49,7 @@ import {
+ import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
+@@ -24,6 +49,7 @@ import {
    type OrchestrationV2ProviderTurnTokenUsage,
  } from "@t3tools/contracts";
  import { PiSettings } from "../settings.ts";
@@ -411,7 +429,7 @@ index 722ac13b3..2d195da51 100644
  import * as Cause from "effect/Cause";
  import * as DateTime from "effect/DateTime";
  import * as Deferred from "effect/Deferred";
-@@ -399,6 +400,8 @@ interface ActivePiTurn {
+@@ -354,6 +380,8 @@ interface ActivePiTurn {
    readonly turnInput: ProviderAdapter.ProviderAdapterV2TurnInput;
    readonly providerTurn: OrchestrationV2ProviderTurn;
    readonly startedAt: DateTime.Utc;
@@ -419,8 +437,8 @@ index 722ac13b3..2d195da51 100644
 +  lastTokenSpeedEmissionMs?: number;
    readonly itemOrdinals: Map<string, number>;
    nextItemOrdinal: number;
-   /** Increments on assistant `message_start` so content indexes stay unique. */
-@@ -1322,6 +1325,30 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
+   messageOrdinal: number;
+@@ -1210,6 +1238,30 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
          const method = recordString(event, "method");
          const nativeRequestId = recordString(event, "id");
          if (method === undefined) return;
@@ -451,7 +469,7 @@ index 722ac13b3..2d195da51 100644
          if (method === "notify") {
            const state = threadState;
            const turn = state?.activeTurn ?? null;
-@@ -1643,6 +1670,9 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
+@@ -1511,6 +1563,9 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
              status: interrupted ? "interrupted" : failure !== null ? "failed" : "completed",
              completedAt,
              ...(tokenUsage === undefined ? {} : { tokenUsage }),
