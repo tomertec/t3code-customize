@@ -39,8 +39,11 @@ def main():
         head = tool.git('rev-parse', 'HEAD').strip()
         tool.checks(env, log)
         tool.build_bundles(env, args.version, Path(stock), config, log, target_platform='win32')
-        if tool.git('rev-parse', 'HEAD').strip() != head or tool.git('status', '--porcelain', '--untracked-files=no').strip():
-            raise tool.Stop('Source changed during the portable build.')
+        final_head = tool.git('rev-parse', 'HEAD').strip()
+        changed = tool.git('status', '--porcelain', '--untracked-files=no').strip()
+        if final_head != head or changed:
+            details = '\nTracked source changes:\n' + changed if changed else ''
+            raise tool.Stop('Source changed during the portable build.' + details)
         files = {}
         for prefix in ('apps/server/dist', 'apps/desktop/dist-electron'):
             for path in sorted((tool.SOURCE / prefix).rglob('*')):
