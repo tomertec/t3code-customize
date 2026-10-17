@@ -1,5 +1,6 @@
 {
   "tests": [
+    "apps/web/src/components/chat/useWorktreeSetup.test.tsx",
     "apps/web/src/hooks/useIncrementalTimelineEntries.test.tsx",
     "apps/web/src/session-logic.test.ts",
     "apps/server/src/orchestration-v2/Adapters/ClaudeResponseThroughput.test.ts",

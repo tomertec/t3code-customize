@@ -1,0 +1,72 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tomer Vaknin <tomer@tec.org.il>
+Date: Sat, 17 Oct 2026 20:31:20 +0300
+Subject: [PATCH] fix(web): compare worktree setup routes by durable identity
+
+---
+ .../components/chat/useWorktreeSetup.test.tsx | 38 +++++++++++++++++++
+ .../src/components/chat/useWorktreeSetup.ts   |  6 ++-
+ 2 files changed, 42 insertions(+), 2 deletions(-)
+ create mode 100644 apps/web/src/components/chat/useWorktreeSetup.test.tsx
+
+diff --git a/apps/web/src/components/chat/useWorktreeSetup.test.tsx b/apps/web/src/components/chat/useWorktreeSetup.test.tsx
+new file mode 100644
+index 000000000..2c1744367
+--- /dev/null
++++ b/apps/web/src/components/chat/useWorktreeSetup.test.tsx
+@@ -0,0 +1,38 @@
++import { EnvironmentId, ThreadId } from "@t3tools/contracts";
++import { act, useState } from "react";
++import { create, type ReactTestRenderer } from "react-test-renderer";
++import { afterEach, expect, it, vi } from "vite-plus/test";
++import { useWorktreeSetup } from "./useWorktreeSetup";
++
++vi.mock("../../state/query", () => ({ useEnvironmentQuery: () => ({ data: undefined }) }));
++vi.mock("../../state/use-atom-command", () => ({ useAtomCommand: () => vi.fn() }));
++vi.mock("../../state/threads", () => ({ threadEnvironment: { retryWorkspacePreparation: {} } }));
++vi.mock("../../state/vcs", () => ({ vcsEnvironment: { cancelWorktreeSetup: {}, worktreeSetup: vi.fn() } }));
++vi.mock("../../terminalUiStateStore", () => ({ useTerminalUiStateStore: () => vi.fn() }));
++
++let renderer: ReactTestRenderer | null = null;
++afterEach(async () => {
++  await act(() => renderer?.unmount());
++  renderer = null;
++  vi.unstubAllGlobals();
++});
++
++it("settles when ChatView recreates the same route reference during render retries", async () => {
++  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
++  let renders = 0;
++  function Probe() {
++    renders++;
++    const [ready, setReady] = useState(false);
++    if (!ready) setReady(true);
++    const setup = useWorktreeSetup({
++      routeThreadRef: { environmentId: EnvironmentId.make("local"), threadId: ThreadId.make("draft") },
++      ownerKey: "draft", activeThread: undefined, threadRef: null,
++      serverProjection: null, activityRun: null, localPreparing: false,
++      sendQueuesBehindSetup: false, followUpSent: false,
++    });
++    return <span>{String(setup.blocksSend)}</span>;
++  }
++  await act(() => { renderer = create(<Probe />); });
++  expect(renderer!.toJSON()).toMatchObject({ children: ["false"] });
++  expect(renders).toBeLessThan(5);
++});
+diff --git a/apps/web/src/components/chat/useWorktreeSetup.ts b/apps/web/src/components/chat/useWorktreeSetup.ts
+index 6f8cb1269..1302cf024 100644
+--- a/apps/web/src/components/chat/useWorktreeSetup.ts
++++ b/apps/web/src/components/chat/useWorktreeSetup.ts
+@@ -89,8 +89,10 @@ export function useWorktreeSetup(input: {
+     readonly routeThreadRef: ScopedThreadRef;
+     readonly latestSnapshot: WorktreeSetupSnapshot | null | undefined;
+   }>({ routeThreadRef, latestSnapshot: null });
+-  if (heldFor.routeThreadRef !== routeThreadRef || heldFor.latestSnapshot !== latestSnapshot) {
+-    const routeChanged = heldFor.routeThreadRef !== routeThreadRef;
++  const routeChanged =
++    heldFor.routeThreadRef.environmentId !== routeThreadRef.environmentId ||
++    heldFor.routeThreadRef.threadId !== routeThreadRef.threadId;
++  if (routeChanged || heldFor.latestSnapshot !== latestSnapshot) {
+     setHeldFor({ routeThreadRef, latestSnapshot });
+     if (routeChanged) {
+       setHeldSnapshot(null);
