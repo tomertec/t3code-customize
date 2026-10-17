@@ -1,5 +1,7 @@
 {
   "tests": [
+    "apps/web/src/hooks/useIncrementalTimelineEntries.test.tsx",
+    "apps/web/src/session-logic.test.ts",
     "apps/server/src/orchestration-v2/Adapters/ClaudeResponseThroughput.test.ts",
     "apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts",
     "apps/server/src/orchestration-v2/Adapters/CodexResponseThroughput.test.ts",

@@ -1,0 +1,124 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tomer Vaknin <tomer@tec.org.il>
+Date: Sat, 17 Oct 2026 20:22:19 +0300
+Subject: [PATCH] fix(web): avoid render loops in incremental timeline
+ projection
+
+---
+ .../useIncrementalTimelineEntries.test.tsx    | 60 +++++++++++++++++++
+ .../hooks/useIncrementalTimelineEntries.ts    | 32 ++++++----
+ 2 files changed, 79 insertions(+), 13 deletions(-)
+ create mode 100644 apps/web/src/hooks/useIncrementalTimelineEntries.test.tsx
+
+diff --git a/apps/web/src/hooks/useIncrementalTimelineEntries.test.tsx b/apps/web/src/hooks/useIncrementalTimelineEntries.test.tsx
+new file mode 100644
+index 000000000..37349bbc3
+--- /dev/null
++++ b/apps/web/src/hooks/useIncrementalTimelineEntries.test.tsx
+@@ -0,0 +1,60 @@
++import { act, useState } from "react";
++import { create, type ReactTestRenderer } from "react-test-renderer";
++import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
++import { useIncrementalTimelineEntries } from "./useIncrementalTimelineEntries";
++import { MessageId } from "@t3tools/contracts";
++import type { ChatMessage } from "../types";
++import type { TimelineEntry } from "../session-logic";
++
++let renderer: ReactTestRenderer | null = null;
++beforeEach(() => vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true));
++afterEach(async () => {
++  await act(() => renderer?.unmount());
++  renderer = null;
++  vi.unstubAllGlobals();
++});
++
++it("settles when ChatView recreates timeline containers during a render retry", async () => {
++  let renders = 0;
++  function Probe() {
++    renders++;
++    const [ready, setReady] = useState(false);
++    if (!ready) setReady(true);
++    const entries = useIncrementalTimelineEntries(null, {
++      visibleTurnItems: [],
++      optimisticMessages: [],
++      anchoredMessages: [],
++      attachmentUrlById: new Map(),
++    });
++    return <span>{entries.length}</span>;
++  }
++  await act(() => { renderer = create(<Probe />); });
++  expect(renderer!.toJSON()).toMatchObject({ children: ["0"] });
++  expect(renders).toBeLessThan(5);
++});
++
++it("reuses committed rows, applies message updates, and resets on a thread switch", async () => {
++  let entries: TimelineEntry[] = [];
++  const message: ChatMessage = {
++    id: MessageId.make("optimistic-1"), role: "user", text: "Hello",
++    runId: null, streaming: false,
++    createdAt: "2026-10-17T00:00:00.000Z", updatedAt: "2026-10-17T00:00:00.000Z",
++  };
++  function Probe({ threadKey, message }: { threadKey: string; message: ChatMessage }) {
++    entries = useIncrementalTimelineEntries(threadKey, {
++      visibleTurnItems: [], optimisticMessages: [message],
++      anchoredMessages: [], attachmentUrlById: new Map(),
++    });
++    return null;
++  }
++  await act(() => { renderer = create(<Probe threadKey="a" message={message} />); });
++  const first = entries;
++  await act(() => { renderer!.update(<Probe threadKey="a" message={message} />); });
++  expect(entries).toBe(first);
++  const updated = { ...message, text: "Updated" };
++  await act(() => { renderer!.update(<Probe threadKey="a" message={updated} />); });
++  expect(entries[0]).toMatchObject({ kind: "message", message: { text: "Updated" } });
++  const beforeSwitch = entries;
++  await act(() => { renderer!.update(<Probe threadKey="b" message={updated} />); });
++  expect(entries).not.toBe(beforeSwitch);
++});
+diff --git a/apps/web/src/hooks/useIncrementalTimelineEntries.ts b/apps/web/src/hooks/useIncrementalTimelineEntries.ts
+index 712b84263..570967cc6 100644
+--- a/apps/web/src/hooks/useIncrementalTimelineEntries.ts
++++ b/apps/web/src/hooks/useIncrementalTimelineEntries.ts
+@@ -1,4 +1,4 @@
+-import { useState } from "react";
++import { useLayoutEffect, useRef } from "react";
+ import {
+   deriveTimelineEntriesFromVisibleTurnItemsWithState,
+   type TimelineEntriesInput,
+@@ -26,17 +26,23 @@ export function useIncrementalTimelineEntries(
+   threadKey: string | null,
+   input: TimelineEntriesInput,
+ ): TimelineEntriesProjection["entries"] {
+-  const [state, setState] = useState(() => ({
+-    threadKey,
+-    projection: deriveTimelineEntriesFromVisibleTurnItemsWithState(input),
+-  }));
+-  if (state.threadKey === threadKey && sameInput(state.projection.input, input)) {
+-    return state.projection.entries;
+-  }
+-  const projection = deriveTimelineEntriesFromVisibleTurnItemsWithState(
+-    input,
+-    state.threadKey === threadKey ? state.projection : null,
+-  );
+-  setState({ threadKey, projection });
++  const committed = useRef<{
++    threadKey: string | null;
++    projection: TimelineEntriesProjection;
++  } | null>(null);
++  const previous = committed.current;
++  const projection =
++    previous?.threadKey === threadKey && sameInput(previous.projection.input, input)
++      ? previous.projection
++      : deriveTimelineEntriesFromVisibleTurnItemsWithState(
++          input,
++          previous?.threadKey === threadKey ? previous.projection : null,
++        );
++  // ChatView can recreate input containers on a render retry. Scheduling state
++  // here would retry forever. Cache only committed work, so abandoned concurrent
++  // renders cannot replace the projection used by the next update.
++  useLayoutEffect(() => {
++    committed.current = { threadKey, projection };
++  }, [threadKey, projection]);
+   return projection.entries;
+ }
