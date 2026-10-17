@@ -522,7 +522,10 @@ def build_bundles(env, version, stock_root, config, log, target_platform=None):
     Path(env['TMPDIR']).mkdir(parents=True, exist_ok=True)
     packages = [SOURCE / 'apps' / app / 'package.json' for app in ('web', 'server', 'desktop')]
     # The desktop build regenerates this tracked file; put the committed copy back afterwards.
-    generated = [SOURCE / 'apps/desktop/src/preview/AnnotationStyles.generated.ts']
+    generated = [
+        SOURCE / 'apps/desktop/src/preview/AnnotationStyles.generated.ts',
+        SOURCE / 'apps/web/src/routeTree.gen.ts',
+    ]
     originals = {path: path.read_bytes() for path in packages + generated if path.exists()}
     try:
         for path in packages:
