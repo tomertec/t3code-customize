@@ -1,0 +1,100 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tomer Vaknin <tomer@tec.org.il>
+Date: Sat, 17 Oct 2026 20:44:16 +0300
+Subject: [PATCH] fix(web): retain committed panel values without render
+ updates
+
+---
+ .../web/src/panelAnimations.presence.test.tsx | 51 +++++++++++++++++++
+ apps/web/src/panelAnimations.ts               | 14 +++--
+ 2 files changed, 60 insertions(+), 5 deletions(-)
+ create mode 100644 apps/web/src/panelAnimations.presence.test.tsx
+
+diff --git a/apps/web/src/panelAnimations.presence.test.tsx b/apps/web/src/panelAnimations.presence.test.tsx
+new file mode 100644
+index 000000000..6f3d164ab
+--- /dev/null
++++ b/apps/web/src/panelAnimations.presence.test.tsx
+@@ -0,0 +1,51 @@
++import { act, useState } from "react";
++import { create, type ReactTestRenderer } from "react-test-renderer";
++import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
++import { usePanelPresence } from "./panelAnimations";
++
++vi.mock("./hooks/useMediaQuery", () => ({ useMediaQuery: () => false }));
++vi.mock("./hooks/useSettings", () => ({ useClientSettings: () => 200 }));
++
++let renderer: ReactTestRenderer | null = null;
++beforeEach(() => {
++  vi.useFakeTimers();
++  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
++  vi.stubGlobal("window", { setTimeout, clearTimeout });
++});
++afterEach(async () => {
++  await act(() => renderer?.unmount());
++  renderer = null;
++  vi.useRealTimers();
++  vi.unstubAllGlobals();
++});
++
++it("settles when a session switch retries with a freshly allocated panel value", async () => {
++  let renders = 0;
++  function Probe() {
++    renders++;
++    const [ready, setReady] = useState(false);
++    if (!ready) setReady(true);
++    const panel = usePanelPresence(true, { surface: "terminal" }, true, "thread-a", 200);
++    return <span>{panel.value?.surface}</span>;
++  }
++  await act(() => { renderer = create(<Probe />); });
++  expect(renderer!.toJSON()).toMatchObject({ children: ["terminal"] });
++  expect(renders).toBeLessThan(5);
++});
++
++it("retains the latest committed value while closing and drops it across sessions", async () => {
++  let observed: ReturnType<typeof usePanelPresence<string>>;
++  function Probe({ open, scope, value }: { open: boolean; scope: string; value: string }) {
++    observed = usePanelPresence(open, value, true, scope, 200);
++    return null;
++  }
++  await act(() => { renderer = create(<Probe open scope="a" value="first" />); });
++  await act(() => { renderer!.update(<Probe open scope="a" value="latest" />); });
++  await act(() => { renderer!.update(<Probe open={false} scope="a" value="ignored" />); });
++  expect(observed!).toEqual({ present: true, value: "latest" });
++  await act(() => { vi.advanceTimersByTime(200); });
++  expect(observed!).toEqual({ present: false, value: null });
++  await act(() => { renderer!.update(<Probe open scope="a" value="latest" />); });
++  await act(() => { renderer!.update(<Probe open={false} scope="b" value="other" />); });
++  expect(observed!).toEqual({ present: false, value: null });
++});
+diff --git a/apps/web/src/panelAnimations.ts b/apps/web/src/panelAnimations.ts
+index efbdfa526..8eaa25394 100644
+--- a/apps/web/src/panelAnimations.ts
++++ b/apps/web/src/panelAnimations.ts
+@@ -1,4 +1,4 @@
+-import { createContext, useContext, useEffect, useState } from "react";
++import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
+ import { type PanelAnimationDurationMs } from "@t3tools/contracts/settings";
+ 
+ import { useMediaQuery } from "./hooks/useMediaQuery";
+@@ -45,12 +45,16 @@ export function usePanelPresence<T>(
+   durationMs: PanelAnimationDurationMs,
+ ): { present: boolean; value: T | null } {
+   const [present, setPresent] = useState(open);
+-  const [retained, setRetained] = useState<{ scopeKey: string | null; value: T | null } | null>(
++  const retainedRef = useRef<{ scopeKey: string | null; value: T | null } | null>(
+     open ? { scopeKey, value } : null,
+   );
+-  if (open && (retained?.scopeKey !== scopeKey || retained.value !== value)) {
+-    setRetained({ scopeKey, value });
+-  }
++  const retained = retainedRef.current;
++  // A panel value can be a new object on every render. Retaining it must not
++  // schedule another render, or a session switch can retry forever. Only retain
++  // committed values so an abandoned render cannot alter the closing panel.
++  useLayoutEffect(() => {
++    if (open) retainedRef.current = { scopeKey, value };
++  }, [open, scopeKey, value]);
+ 
+   if (open && !present) setPresent(true);
+   if (!open && !animated && present) setPresent(false);
