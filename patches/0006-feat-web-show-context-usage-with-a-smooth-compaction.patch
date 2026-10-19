@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Tomer Vaknin <tomer@tec.org.il>
 Date: Wed, 14 Oct 2026 18:06:26 +0300
-Subject: [PATCH 6/6] feat(web): show context usage with a smooth
+Subject: [PATCH 6/9] feat(web): show context usage with a smooth
  compaction-aware meter
 
 Render actual window occupancy in a rounded provider-accented track, with pressure-based warning colors, quarter marks, and a reported or configured compaction threshold marker. Share the meter with context details, retain token fallback and compact controls, and respect reduced motion. Preserve the original segmented-meter helper coverage and test threshold validity separately.
@@ -12,7 +12,7 @@ Render actual window occupancy in a rounded provider-accented track, with pressu
  3 files changed, 150 insertions(+), 8 deletions(-)
 
 diff --git a/apps/web/src/components/chat/ComposerStats.logic.test.ts b/apps/web/src/components/chat/ComposerStats.logic.test.ts
-index 206eb9b42..5ef0b5fbc 100644
+index 206eb9b428..5ef0b5fbc7 100644
 --- a/apps/web/src/components/chat/ComposerStats.logic.test.ts
 +++ b/apps/web/src/components/chat/ComposerStats.logic.test.ts
 @@ -14,6 +14,8 @@ import { describe, expect, it } from "vite-plus/test";
@@ -75,7 +75,7 @@ index 206eb9b42..5ef0b5fbc 100644
 +  });
 +});
 diff --git a/apps/web/src/components/chat/ComposerStats.logic.ts b/apps/web/src/components/chat/ComposerStats.logic.ts
-index 7e6856ea4..9fb5d6fbe 100644
+index 7e6856ea4b..9fb5d6fbe1 100644
 --- a/apps/web/src/components/chat/ComposerStats.logic.ts
 +++ b/apps/web/src/components/chat/ComposerStats.logic.ts
 @@ -306,3 +306,34 @@ export function deriveContextCompaction(
@@ -114,7 +114,7 @@ index 7e6856ea4..9fb5d6fbe 100644
 +  return (threshold / maxTokens) * 100;
 +}
 diff --git a/apps/web/src/components/chat/ComposerStats.tsx b/apps/web/src/components/chat/ComposerStats.tsx
-index 0d2672ff6..700857adc 100644
+index 0d2672ff61..700857adc7 100644
 --- a/apps/web/src/components/chat/ComposerStats.tsx
 +++ b/apps/web/src/components/chat/ComposerStats.tsx
 @@ -20,6 +20,7 @@ import {

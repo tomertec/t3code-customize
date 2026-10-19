@@ -1,23 +1,24 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Tomer Vaknin <tomer@tec.org.il>
 Date: Sat, 17 Oct 2026 20:31:20 +0300
-Subject: [PATCH] fix(web): compare worktree setup routes by durable identity
+Subject: [PATCH 8/9] fix(web): compare worktree setup routes by durable
+ identity
 
 ---
- .../components/chat/useWorktreeSetup.test.tsx | 38 +++++++++++++++++++
+ .../chat/useWorktreeSetup.browser.test.tsx    | 39 +++++++++++++++++++
  .../src/components/chat/useWorktreeSetup.ts   |  6 ++-
- 2 files changed, 42 insertions(+), 2 deletions(-)
- create mode 100644 apps/web/src/components/chat/useWorktreeSetup.test.tsx
+ 2 files changed, 43 insertions(+), 2 deletions(-)
+ create mode 100644 apps/web/src/components/chat/useWorktreeSetup.browser.test.tsx
 
-diff --git a/apps/web/src/components/chat/useWorktreeSetup.test.tsx b/apps/web/src/components/chat/useWorktreeSetup.test.tsx
+diff --git a/apps/web/src/components/chat/useWorktreeSetup.browser.test.tsx b/apps/web/src/components/chat/useWorktreeSetup.browser.test.tsx
 new file mode 100644
-index 000000000..2c1744367
+index 0000000000..79bf112a4c
 --- /dev/null
-+++ b/apps/web/src/components/chat/useWorktreeSetup.test.tsx
-@@ -0,0 +1,38 @@
++++ b/apps/web/src/components/chat/useWorktreeSetup.browser.test.tsx
+@@ -0,0 +1,39 @@
 +import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 +import { act, useState } from "react";
-+import { create, type ReactTestRenderer } from "react-test-renderer";
++import { createRoot, type Root } from "react-dom/client";
 +import { afterEach, expect, it, vi } from "vite-plus/test";
 +import { useWorktreeSetup } from "./useWorktreeSetup";
 +
@@ -27,7 +28,8 @@ index 000000000..2c1744367
 +vi.mock("../../state/vcs", () => ({ vcsEnvironment: { cancelWorktreeSetup: {}, worktreeSetup: vi.fn() } }));
 +vi.mock("../../terminalUiStateStore", () => ({ useTerminalUiStateStore: () => vi.fn() }));
 +
-+let renderer: ReactTestRenderer | null = null;
++let renderer: Root | null = null;
++let container: HTMLDivElement;
 +afterEach(async () => {
 +  await act(() => renderer?.unmount());
 +  renderer = null;
@@ -49,12 +51,12 @@ index 000000000..2c1744367
 +    });
 +    return <span>{String(setup.blocksSend)}</span>;
 +  }
-+  await act(() => { renderer = create(<Probe />); });
-+  expect(renderer!.toJSON()).toMatchObject({ children: ["false"] });
++  await act(() => { container = document.createElement("div"); renderer = createRoot(container); renderer.render(<Probe />); });
++  expect(container.textContent).toBe("false");
 +  expect(renders).toBeLessThan(5);
 +});
 diff --git a/apps/web/src/components/chat/useWorktreeSetup.ts b/apps/web/src/components/chat/useWorktreeSetup.ts
-index 6f8cb1269..1302cf024 100644
+index 6f8cb1269d..1302cf0249 100644
 --- a/apps/web/src/components/chat/useWorktreeSetup.ts
 +++ b/apps/web/src/components/chat/useWorktreeSetup.ts
 @@ -89,8 +89,10 @@ export function useWorktreeSetup(input: {

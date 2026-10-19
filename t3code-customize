@@ -438,7 +438,10 @@ def rebase_in_progress():
 
 
 def has_commit(ref):
-    return git('cat-file', '-e', ref + '^{commit}', check=False, capture=False).returncode == 0
+    # A missing object is expected before fetching a new Nightly, not a fatal error.
+    with open(os.devnull, 'w') as sink:
+        return git('rev-parse', '--verify', '--quiet', ref + '^{commit}',
+                   check=False, capture=False, log=sink).returncode == 0
 
 
 def ensure_commit(commit, version, log):
@@ -499,11 +502,21 @@ def checks(env, log):
     if missing:
         raise NeedsFix('Test files listed in checks.json no longer exist (moved upstream?):\n' + '\n'.join('  ' + t for t in missing))
     step('Testing the patches...')
-    steps = [(['vp', 'test', 'run', *spec['tests']], 'The patch tests failed.')]
-    steps += [(['tsc', '--noEmit', '-p', p + '/tsconfig.json'], f'Typecheck failed in {p}.') for p in spec['typecheck']]
-    for args, message in steps:
+    browser_tests = [t for t in spec['tests'] if t.startswith('apps/web/') and '.browser.test.' in t]
+    node_tests = [t for t in spec['tests'] if t not in browser_tests]
+    steps = []
+    if node_tests:
+        steps.append((['vp', 'test', 'run', *node_tests], SOURCE, 'The patch tests failed.'))
+    if browser_tests:
+        web = SOURCE / 'apps/web'
+        steps.append(([*pnpm(env), 'exec', 'playwright', 'install', 'chromium'], web,
+                      'Could not prepare Chromium for the patch browser tests.'))
+        steps.append((['vp', 'test', 'run', *[str(Path(t).relative_to('apps/web')) for t in browser_tests]],
+                      web, 'The patch browser tests failed.'))
+    steps += [(['tsc', '--noEmit', '-p', p + '/tsconfig.json'], SOURCE, f'Typecheck failed in {p}.') for p in spec['typecheck']]
+    for args, cwd, message in steps:
         step('Checking: ' + ' '.join(args))
-        result = run(args, cwd=SOURCE, env=env, log=log, check=False)
+        result = run(args, cwd=cwd, env=env, log=log, check=False)
         if result.returncode:
             raise NeedsFix(message + f' Exit code: {result.returncode}. Command: ' + ' '.join(args))
     if (git('rev-parse', 'HEAD').strip() != checked_head

@@ -1,34 +1,34 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Tomer Vaknin <tomer@tec.org.il>
 Date: Sat, 17 Oct 2026 20:44:16 +0300
-Subject: [PATCH] fix(web): retain committed panel values without render
+Subject: [PATCH 9/9] fix(web): retain committed panel values without render
  updates
 
 ---
- .../web/src/panelAnimations.presence.test.tsx | 51 +++++++++++++++++++
+ .../panelAnimations.presence.browser.test.tsx | 51 +++++++++++++++++++
  apps/web/src/panelAnimations.ts               | 14 +++--
  2 files changed, 60 insertions(+), 5 deletions(-)
- create mode 100644 apps/web/src/panelAnimations.presence.test.tsx
+ create mode 100644 apps/web/src/panelAnimations.presence.browser.test.tsx
 
-diff --git a/apps/web/src/panelAnimations.presence.test.tsx b/apps/web/src/panelAnimations.presence.test.tsx
+diff --git a/apps/web/src/panelAnimations.presence.browser.test.tsx b/apps/web/src/panelAnimations.presence.browser.test.tsx
 new file mode 100644
-index 000000000..6f3d164ab
+index 0000000000..e2dbb32328
 --- /dev/null
-+++ b/apps/web/src/panelAnimations.presence.test.tsx
++++ b/apps/web/src/panelAnimations.presence.browser.test.tsx
 @@ -0,0 +1,51 @@
 +import { act, useState } from "react";
-+import { create, type ReactTestRenderer } from "react-test-renderer";
++import { createRoot, type Root } from "react-dom/client";
 +import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
 +import { usePanelPresence } from "./panelAnimations";
 +
 +vi.mock("./hooks/useMediaQuery", () => ({ useMediaQuery: () => false }));
 +vi.mock("./hooks/useSettings", () => ({ useClientSettings: () => 200 }));
 +
-+let renderer: ReactTestRenderer | null = null;
++let renderer: Root | null = null;
++let container: HTMLDivElement;
 +beforeEach(() => {
 +  vi.useFakeTimers();
 +  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-+  vi.stubGlobal("window", { setTimeout, clearTimeout });
 +});
 +afterEach(async () => {
 +  await act(() => renderer?.unmount());
@@ -46,8 +46,8 @@ index 000000000..6f3d164ab
 +    const panel = usePanelPresence(true, { surface: "terminal" }, true, "thread-a", 200);
 +    return <span>{panel.value?.surface}</span>;
 +  }
-+  await act(() => { renderer = create(<Probe />); });
-+  expect(renderer!.toJSON()).toMatchObject({ children: ["terminal"] });
++  await act(() => { container = document.createElement("div"); renderer = createRoot(container); renderer.render(<Probe />); });
++  expect(container.textContent).toBe("terminal");
 +  expect(renders).toBeLessThan(5);
 +});
 +
@@ -57,18 +57,18 @@ index 000000000..6f3d164ab
 +    observed = usePanelPresence(open, value, true, scope, 200);
 +    return null;
 +  }
-+  await act(() => { renderer = create(<Probe open scope="a" value="first" />); });
-+  await act(() => { renderer!.update(<Probe open scope="a" value="latest" />); });
-+  await act(() => { renderer!.update(<Probe open={false} scope="a" value="ignored" />); });
++  await act(() => { container = document.createElement("div"); renderer = createRoot(container); renderer.render(<Probe open scope="a" value="first" />); });
++  await act(() => { renderer!.render(<Probe open scope="a" value="latest" />); });
++  await act(() => { renderer!.render(<Probe open={false} scope="a" value="ignored" />); });
 +  expect(observed!).toEqual({ present: true, value: "latest" });
 +  await act(() => { vi.advanceTimersByTime(200); });
 +  expect(observed!).toEqual({ present: false, value: null });
-+  await act(() => { renderer!.update(<Probe open scope="a" value="latest" />); });
-+  await act(() => { renderer!.update(<Probe open={false} scope="b" value="other" />); });
++  await act(() => { renderer!.render(<Probe open scope="a" value="latest" />); });
++  await act(() => { renderer!.render(<Probe open={false} scope="b" value="other" />); });
 +  expect(observed!).toEqual({ present: false, value: null });
 +});
 diff --git a/apps/web/src/panelAnimations.ts b/apps/web/src/panelAnimations.ts
-index efbdfa526..8eaa25394 100644
+index efbdfa526d..8eaa253942 100644
 --- a/apps/web/src/panelAnimations.ts
 +++ b/apps/web/src/panelAnimations.ts
 @@ -1,4 +1,4 @@

@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Tomer Vaknin <tomer@tec.org.il>
 Date: Tue, 13 Oct 2026 18:04:47 +0300
-Subject: [PATCH 5/6] feat(web): add provider icons and accent colors to
+Subject: [PATCH 5/9] feat(web): add provider icons and accent colors to
  composer stats
 
 ---
@@ -10,10 +10,10 @@ Subject: [PATCH 5/6] feat(web): add provider icons and accent colors to
  2 files changed, 118 insertions(+), 31 deletions(-)
 
 diff --git a/apps/web/src/components/ChatView.tsx b/apps/web/src/components/ChatView.tsx
-index f09f1e12c..259a566e8 100644
+index daae8b10cd..affec286cb 100644
 --- a/apps/web/src/components/ChatView.tsx
 +++ b/apps/web/src/components/ChatView.tsx
-@@ -8591,6 +8591,7 @@ export default function ChatView(props: ChatViewProps) {
+@@ -8457,6 +8457,7 @@ export default function ChatView(props: ChatViewProps) {
                        {composerStats !== null && (
                          <ComposerStats
                            {...composerStats}
@@ -22,7 +22,7 @@ index f09f1e12c..259a566e8 100644
                            compactDisabled={compactDisabled}
                            compactDisabledReason={
 diff --git a/apps/web/src/components/chat/ComposerStats.tsx b/apps/web/src/components/chat/ComposerStats.tsx
-index 6810e9cb3..0d2672ff6 100644
+index 6810e9cb32..0d2672ff61 100644
 --- a/apps/web/src/components/chat/ComposerStats.tsx
 +++ b/apps/web/src/components/chat/ComposerStats.tsx
 @@ -10,6 +10,7 @@ import * as DateTime from "effect/DateTime";

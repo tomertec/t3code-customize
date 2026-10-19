@@ -1,30 +1,31 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Tomer Vaknin <tomer@tec.org.il>
 Date: Sat, 17 Oct 2026 20:22:19 +0300
-Subject: [PATCH] fix(web): avoid render loops in incremental timeline
+Subject: [PATCH 7/9] fix(web): avoid render loops in incremental timeline
  projection
 
 ---
- .../useIncrementalTimelineEntries.test.tsx    | 60 +++++++++++++++++++
+ ...ncrementalTimelineEntries.browser.test.tsx | 61 +++++++++++++++++++
  .../hooks/useIncrementalTimelineEntries.ts    | 32 ++++++----
- 2 files changed, 79 insertions(+), 13 deletions(-)
- create mode 100644 apps/web/src/hooks/useIncrementalTimelineEntries.test.tsx
+ 2 files changed, 80 insertions(+), 13 deletions(-)
+ create mode 100644 apps/web/src/hooks/useIncrementalTimelineEntries.browser.test.tsx
 
-diff --git a/apps/web/src/hooks/useIncrementalTimelineEntries.test.tsx b/apps/web/src/hooks/useIncrementalTimelineEntries.test.tsx
+diff --git a/apps/web/src/hooks/useIncrementalTimelineEntries.browser.test.tsx b/apps/web/src/hooks/useIncrementalTimelineEntries.browser.test.tsx
 new file mode 100644
-index 000000000..37349bbc3
+index 0000000000..78c4663c48
 --- /dev/null
-+++ b/apps/web/src/hooks/useIncrementalTimelineEntries.test.tsx
-@@ -0,0 +1,60 @@
++++ b/apps/web/src/hooks/useIncrementalTimelineEntries.browser.test.tsx
+@@ -0,0 +1,61 @@
 +import { act, useState } from "react";
-+import { create, type ReactTestRenderer } from "react-test-renderer";
++import { createRoot, type Root } from "react-dom/client";
 +import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
 +import { useIncrementalTimelineEntries } from "./useIncrementalTimelineEntries";
 +import { MessageId } from "@t3tools/contracts";
 +import type { ChatMessage } from "../types";
 +import type { TimelineEntry } from "../session-logic";
 +
-+let renderer: ReactTestRenderer | null = null;
++let renderer: Root | null = null;
++let container: HTMLDivElement;
 +beforeEach(() => vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true));
 +afterEach(async () => {
 +  await act(() => renderer?.unmount());
@@ -46,8 +47,8 @@ index 000000000..37349bbc3
 +    });
 +    return <span>{entries.length}</span>;
 +  }
-+  await act(() => { renderer = create(<Probe />); });
-+  expect(renderer!.toJSON()).toMatchObject({ children: ["0"] });
++  await act(() => { container = document.createElement("div"); renderer = createRoot(container); renderer.render(<Probe />); });
++  expect(container.textContent).toBe("0");
 +  expect(renders).toBeLessThan(5);
 +});
 +
@@ -65,19 +66,19 @@ index 000000000..37349bbc3
 +    });
 +    return null;
 +  }
-+  await act(() => { renderer = create(<Probe threadKey="a" message={message} />); });
++  await act(() => { container = document.createElement("div"); renderer = createRoot(container); renderer.render(<Probe threadKey="a" message={message} />); });
 +  const first = entries;
-+  await act(() => { renderer!.update(<Probe threadKey="a" message={message} />); });
++  await act(() => { renderer!.render(<Probe threadKey="a" message={message} />); });
 +  expect(entries).toBe(first);
 +  const updated = { ...message, text: "Updated" };
-+  await act(() => { renderer!.update(<Probe threadKey="a" message={updated} />); });
++  await act(() => { renderer!.render(<Probe threadKey="a" message={updated} />); });
 +  expect(entries[0]).toMatchObject({ kind: "message", message: { text: "Updated" } });
 +  const beforeSwitch = entries;
-+  await act(() => { renderer!.update(<Probe threadKey="b" message={updated} />); });
++  await act(() => { renderer!.render(<Probe threadKey="b" message={updated} />); });
 +  expect(entries).not.toBe(beforeSwitch);
 +});
 diff --git a/apps/web/src/hooks/useIncrementalTimelineEntries.ts b/apps/web/src/hooks/useIncrementalTimelineEntries.ts
-index 712b84263..570967cc6 100644
+index 712b842631..570967cc66 100644
 --- a/apps/web/src/hooks/useIncrementalTimelineEntries.ts
 +++ b/apps/web/src/hooks/useIncrementalTimelineEntries.ts
 @@ -1,4 +1,4 @@

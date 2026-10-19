@@ -22,6 +22,28 @@ loader.exec_module(tool)
 
 
 class CliTests(unittest.TestCase):
+    def test_commit_probe_is_quiet_for_present_and_missing_commits(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            subprocess.run(['git', 'init', '-q', str(root)], check=True)
+            subprocess.run(['git', '-C', str(root), '-c', 'user.name=Test',
+                            '-c', 'user.email=test@example.com', 'commit',
+                            '--allow-empty', '-qm', 'baseline'], check=True)
+            script = (
+                'import runpy, sys; from pathlib import Path; '
+                'module = runpy.run_path(sys.argv[1]); '
+                'probe = module["has_commit"]; '
+                'probe.__globals__["SOURCE"] = Path(sys.argv[2]); '
+                'assert probe("HEAD"); '
+                'assert not probe("0" * 40)'
+            )
+            result = subprocess.run([sys.executable, '-c', script,
+                                     str(REPO / 't3code-customize'), str(root)],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, '')
+            self.assertEqual(result.stderr, '')
+
     def test_install_help_accepts_app_path_and_staging(self):
         result = subprocess.run([sys.executable, str(REPO / 't3code-customize'), 'install', '--help'],
                                 capture_output=True, text=True)

@@ -315,10 +315,38 @@ class WindowsTests(unittest.TestCase):
             dirty = True
             return subprocess.CompletedProcess([], 0)
         with patch.object(tool, 'SOURCE', source), patch.object(tool, 'CACHE', self.root / 'cache'), \
-                patch.object(tool, 'git', side_effect=fake_git), patch.object(tool, 'run', side_effect=fake_check):
+                patch.object(tool, 'git', side_effect=fake_git), patch.object(tool, 'pnpm', return_value=['pnpm']), \
+                patch.object(tool, 'run', side_effect=fake_check):
             with self.assertRaisesRegex(tool.Stop, 'changed during verification'):
                 tool.checks({}, None)
         self.assertFalse((self.root / 'cache/checks/source-head.json').exists())
+
+    def test_browser_checks_use_web_project_and_keep_every_required_test(self):
+        source = self.root / 'source'
+        spec = tool.load(REPO / 'checks.json')
+        for name in spec['tests']:
+            path = source / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('')
+        (source / 'pnpm-lock.yaml').write_text('lock')
+        def fake_git(*args):
+            return 'source-head' if args[0] == 'rev-parse' else ''
+        with patch.object(tool, 'SOURCE', source), patch.object(tool, 'CACHE', self.root / 'cache'), \
+                patch.object(tool, 'git', side_effect=fake_git), \
+                patch.object(tool, 'pnpm', return_value=['pnpm']), \
+                patch.object(tool, 'run', return_value=subprocess.CompletedProcess([], 0)) as run:
+            tool.checks({}, None)
+        seen = []
+        for call in run.call_args_list:
+            args = call.args[0]
+            if args[:3] != ['vp', 'test', 'run']:
+                continue
+            cwd = call.kwargs['cwd']
+            for name in args[3:]:
+                seen.append((cwd / name).relative_to(source).as_posix())
+                if '.browser.test.' in name:
+                    self.assertEqual(cwd, source / 'apps/web')
+        self.assertCountEqual(seen, spec['tests'])
 
 
 
