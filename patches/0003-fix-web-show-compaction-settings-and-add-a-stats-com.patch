@@ -10,14 +10,14 @@ Subject: [PATCH 3/9] fix(web): show compaction settings and add a stats
  .../components/chat/ComposerStats.logic.ts    | 52 ++++++++++
  .../web/src/components/chat/ComposerStats.tsx | 73 ++++++++++++--
  apps/web/src/lib/contextWindow.test.ts        | 56 ++++++++++-
- apps/web/src/lib/contextWindow.ts             | 12 +--
- 6 files changed, 317 insertions(+), 26 deletions(-)
+ apps/web/src/lib/contextWindow.ts             | 17 ++--
+ 6 files changed, 322 insertions(+), 26 deletions(-)
 
 diff --git a/apps/web/src/components/ChatView.tsx b/apps/web/src/components/ChatView.tsx
-index fa1f612f30..daae8b10cd 100644
+index c496ab9fb6..13d61b191c 100644
 --- a/apps/web/src/components/ChatView.tsx
 +++ b/apps/web/src/components/ChatView.tsx
-@@ -2544,23 +2544,49 @@ export default function ChatView(props: ChatViewProps) {
+@@ -1424,23 +1424,49 @@ export default function ChatView(props: ChatViewProps) {
      const usageLimits = activeUsageLimits
        ? { limits: activeUsageLimits, providerName: activeProviderName }
        : null;
@@ -69,10 +69,10 @@ index fa1f612f30..daae8b10cd 100644
 +    activeUsageLimits,
 +    activeProviderName,
 +  ]);
-   const pendingBackgroundTasks = (() => {
-     if (serverProjection === null || serverProjection === undefined) {
-       return [];
-@@ -8428,7 +8454,23 @@ export default function ChatView(props: ChatViewProps) {
+   const pendingBackgroundTasks = deriveThreadPendingBackgroundTasks(serverProjection);
+   const activeWorkStartedAt =
+     deriveActiveWorkStartedAt(activeActivityRun, activeRuntime, localDispatchStartedAt) ??
+@@ -3743,7 +3769,23 @@ export default function ChatView(props: ChatViewProps) {
                      </ComposerSurface.Shell>
                      {/* Opaque so timeline content scrolling under the overlay can't show through the stats line. */}
                      <div className={composerStats !== null ? "bg-background" : undefined}>
@@ -209,10 +209,10 @@ index 479e94b193..79b01fd80e 100644
 +  });
 +});
 diff --git a/apps/web/src/components/chat/ComposerStats.logic.ts b/apps/web/src/components/chat/ComposerStats.logic.ts
-index b4f72291f8..8c8236a639 100644
+index d76fbf57e5..17d0d44b64 100644
 --- a/apps/web/src/components/chat/ComposerStats.logic.ts
 +++ b/apps/web/src/components/chat/ComposerStats.logic.ts
-@@ -7,6 +7,7 @@ import type {
+@@ -8,6 +8,7 @@ import type {
    TurnTokenUsage,
  } from "@t3tools/contracts";
  import * as DateTime from "effect/DateTime";
@@ -220,7 +220,7 @@ index b4f72291f8..8c8236a639 100644
  
  /** Provider turn ordinals are scoped to a provider thread; children have their own nodes. */
  export function selectComposerStatsTurns(projection: {
-@@ -248,3 +249,54 @@ export function composerLimitDisplay(
+@@ -249,3 +250,54 @@ export function composerLimitDisplay(
      dimmed: freshness.status !== "fresh",
    };
  }
@@ -452,10 +452,10 @@ index 025f57253e..53b81a83a1 100644
                  <p className="text-muted-foreground">
                    Reported{" "}
 diff --git a/apps/web/src/lib/contextWindow.test.ts b/apps/web/src/lib/contextWindow.test.ts
-index e672c36c19..1f92cc1860 100644
+index c27ddd9a04..f83d682aa1 100644
 --- a/apps/web/src/lib/contextWindow.test.ts
 +++ b/apps/web/src/lib/contextWindow.test.ts
-@@ -8,7 +8,7 @@ import {
+@@ -18,7 +18,7 @@ const decodeTokenUsage = Schema.decodeSync(OrchestrationV2ProviderTurnTokenUsage
  
  describe("V2 context window presentation", () => {
    it("uses retained compaction token data when available", () => {
@@ -464,7 +464,7 @@ index e672c36c19..1f92cc1860 100644
        {
          item: {
            id: "compaction-1" as never,
-@@ -22,8 +22,8 @@ describe("V2 context window presentation", () => {
+@@ -32,8 +32,8 @@ describe("V2 context window presentation", () => {
            ordinal: 1,
            status: "completed",
            title: null,
@@ -475,7 +475,7 @@ index e672c36c19..1f92cc1860 100644
            updatedAt: DateTime.makeUnsafe("2026-06-20T00:00:00.000Z"),
            type: "compaction",
            driver: null,
-@@ -31,9 +31,19 @@ describe("V2 context window presentation", () => {
+@@ -41,9 +41,19 @@ describe("V2 context window presentation", () => {
            afterTokenCount: 2_000,
          },
        },
@@ -495,10 +495,10 @@ index e672c36c19..1f92cc1860 100644
 +    expect(snapshot?.totalProcessedTokens).toBeNull();
 +    expect(snapshot?.compactsAutomatically).toBeNull();
    });
+ });
  
-   it("prefers current provider usage and preserves ACP cost", () => {
-@@ -109,3 +119,39 @@ describe("latestProviderTurnTokenUsage", () => {
-     expect(latest?.usedTokens).toBe(300_000);
+@@ -204,3 +214,39 @@ describe("latestProviderTurnTokenUsage", () => {
+     }
    });
  });
 +
@@ -538,21 +538,26 @@ index e672c36c19..1f92cc1860 100644
 +  });
 +});
 diff --git a/apps/web/src/lib/contextWindow.ts b/apps/web/src/lib/contextWindow.ts
-index e64525e7e9..5bad05664c 100644
+index 32c3bb8de3..2c954e04da 100644
 --- a/apps/web/src/lib/contextWindow.ts
 +++ b/apps/web/src/lib/contextWindow.ts
-@@ -73,8 +73,8 @@ export function deriveLatestContextWindowSnapshot(
+@@ -88,8 +88,13 @@ export function deriveLatestContextWindowSnapshot(
        lastReasoningOutputTokens: null,
        toolUses: null,
        durationMs: null,
 -      compactsAutomatically: true,
--      autoCompactThreshold: null,
-+      compactsAutomatically: providerThread?.contextUsage?.compactsAutomatically ?? null,
-+      autoCompactThreshold: providerThread?.contextUsage?.autoCompactThreshold ?? null,
+-      autoCompactThreshold: liveUsage.autoCompactThreshold ?? null,
++      compactsAutomatically:
++        providerThread?.contextUsage?.compactsAutomatically ??
++        (liveUsage.autoCompactThreshold !== undefined ? true : null),
++      autoCompactThreshold:
++        liveUsage.autoCompactThreshold ??
++        providerThread?.contextUsage?.autoCompactThreshold ??
++        null,
        cost: null,
        updatedAt: liveUsage.updatedAt,
      };
-@@ -116,7 +116,7 @@ export function deriveLatestContextWindowSnapshot(
+@@ -131,7 +136,7 @@ export function deriveLatestContextWindowSnapshot(
    }
    for (let index = entries.length - 1; index >= 0; index -= 1) {
      const entry = entries[index];
@@ -561,7 +566,7 @@ index e64525e7e9..5bad05664c 100644
        continue;
      }
      const payload = entry.item;
-@@ -134,7 +134,7 @@ export function deriveLatestContextWindowSnapshot(
+@@ -149,7 +154,7 @@ export function deriveLatestContextWindowSnapshot(
  
      return {
        usedTokens,
@@ -570,7 +575,7 @@ index e64525e7e9..5bad05664c 100644
        maxTokens,
        remainingTokens,
        usedPercentage,
-@@ -150,10 +150,10 @@ export function deriveLatestContextWindowSnapshot(
+@@ -165,10 +170,10 @@ export function deriveLatestContextWindowSnapshot(
        lastReasoningOutputTokens: null,
        toolUses: null,
        durationMs: null,

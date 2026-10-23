@@ -75,10 +75,10 @@ index 206eb9b428..5ef0b5fbc7 100644
 +  });
 +});
 diff --git a/apps/web/src/components/chat/ComposerStats.logic.ts b/apps/web/src/components/chat/ComposerStats.logic.ts
-index 7e6856ea4b..9fb5d6fbe1 100644
+index e9a9d1a03b..8039a8c89d 100644
 --- a/apps/web/src/components/chat/ComposerStats.logic.ts
 +++ b/apps/web/src/components/chat/ComposerStats.logic.ts
-@@ -306,3 +306,34 @@ export function deriveContextCompaction(
+@@ -307,3 +307,34 @@ export function deriveContextCompaction(
                : "Not reported";
    return { threshold, source, remainingTokens, thresholdPercentage, pressurePercentage, status };
  }

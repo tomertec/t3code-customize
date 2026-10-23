@@ -60,7 +60,7 @@ index 0000000000..017a7078e8
 +  expect(renders).toBeLessThan(5);
 +});
 diff --git a/apps/web/src/components/chat/useWorktreeSetup.ts b/apps/web/src/components/chat/useWorktreeSetup.ts
-index 6f8cb1269d..1302cf0249 100644
+index ed38ad3ef5..f07ebdd029 100644
 --- a/apps/web/src/components/chat/useWorktreeSetup.ts
 +++ b/apps/web/src/components/chat/useWorktreeSetup.ts
 @@ -89,8 +89,10 @@ export function useWorktreeSetup(input: {

@@ -6,7 +6,7 @@ Subject: [PATCH 4/9] feat(pi): display pi-token-speed footer in Stats for
 
 ---
  .../orchestration-v2/ProjectionStore.test.ts  | 13 ++-
- .../src/orchestration-v2/ProjectionStore.ts   | 13 ++-
+ .../src/orchestration-v2/ProjectionStore.ts   | 14 +++-
  .../chat/ComposerStats.logic.test.ts          | 36 +++++++++
  .../components/chat/ComposerStats.logic.ts    |  6 ++
  .../web/src/components/chat/ComposerStats.tsx | 13 ++-
@@ -18,15 +18,15 @@ Subject: [PATCH 4/9] feat(pi): display pi-token-speed footer in Stats for
  packages/provider-pi/src/server/adapter.ts    | 55 +++++++++++++
  .../provider-pi/src/server/tokenSpeed.test.ts | 31 ++++++++
  packages/provider-pi/src/server/tokenSpeed.ts | 17 ++++
- 13 files changed, 312 insertions(+), 6 deletions(-)
+ 13 files changed, 313 insertions(+), 6 deletions(-)
  create mode 100644 packages/provider-pi/src/server/tokenSpeed.test.ts
  create mode 100644 packages/provider-pi/src/server/tokenSpeed.ts
 
 diff --git a/apps/server/src/orchestration-v2/ProjectionStore.test.ts b/apps/server/src/orchestration-v2/ProjectionStore.test.ts
-index 2db37d6d3f..a2cd5fa3c0 100644
+index d6d51409f2..3176ab3e4b 100644
 --- a/apps/server/src/orchestration-v2/ProjectionStore.test.ts
 +++ b/apps/server/src/orchestration-v2/ProjectionStore.test.ts
-@@ -1062,7 +1062,12 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
+@@ -1273,7 +1273,12 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
          nodeId,
          driver,
          occurredAt: now,
@@ -40,7 +40,7 @@ index 2db37d6d3f..a2cd5fa3c0 100644
        });
        yield* projectionStore.apply({
          id: EventId.make("event:provider-usage-reload:without-usage"),
-@@ -1074,6 +1079,10 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
+@@ -1285,6 +1290,10 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
          payload: { ...providerTurn, status: "completed", completedAt: now },
        });
        const withoutUsage = yield* projectionStore.getThreadProjection(threadId);
@@ -51,7 +51,7 @@ index 2db37d6d3f..a2cd5fa3c0 100644
        assert.deepEqual(withoutUsage.providerTurns[0]?.tokenUsage, initialUsage);
        assert.deepEqual(withoutUsage.providerTurns[0]?.responseThroughput, throughput);
  
-@@ -1110,10 +1119,12 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
+@@ -1321,10 +1330,12 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
            completedAt: now,
            tokenUsage: replacementUsage,
            responseThroughput: { ...throughput, partial: true },
@@ -65,10 +65,10 @@ index 2db37d6d3f..a2cd5fa3c0 100644
        assert.deepEqual(replaced.providerTurns[0]?.responseThroughput, {
          ...throughput,
 diff --git a/apps/server/src/orchestration-v2/ProjectionStore.ts b/apps/server/src/orchestration-v2/ProjectionStore.ts
-index db1cb68a8f..c0c66beb65 100644
+index dfbb0893a3..03c8db2859 100644
 --- a/apps/server/src/orchestration-v2/ProjectionStore.ts
 +++ b/apps/server/src/orchestration-v2/ProjectionStore.ts
-@@ -651,6 +651,16 @@ export function upsertProviderTurn(
+@@ -690,6 +690,16 @@ function upsertProviderTurn(
      ...((next.tokenUsage ?? current?.tokenUsage) === undefined
        ? {}
        : { tokenUsage: next.tokenUsage ?? current?.tokenUsage }),
@@ -85,14 +85,15 @@ index db1cb68a8f..c0c66beb65 100644
      ...((next.responseThroughput ?? current?.responseThroughput) === undefined
        ? {}
        : { responseThroughput: next.responseThroughput ?? current?.responseThroughput }),
-@@ -2300,7 +2310,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
-           case "provider-turn.updated": {
-             const existingRows =
-               event.payload.tokenUsage === undefined ||
--              event.payload.responseThroughput === undefined
-+              event.payload.responseThroughput === undefined ||
-+              event.payload.responseTokenSpeed === undefined
-                 ? yield* sql<PayloadRow>`
+@@ -2375,7 +2385,9 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
+             }
+             case "provider-turn.updated": {
+               const existingRows =
+-                event.payload.tokenUsage === undefined || event.payload.responseThroughput === undefined
++                event.payload.tokenUsage === undefined ||
++                event.payload.responseThroughput === undefined ||
++                event.payload.responseTokenSpeed === undefined
+                   ? yield* sql<PayloadRow>`
                      SELECT payload_json
                      FROM orchestration_v2_projection_provider_turns
 diff --git a/apps/web/src/components/chat/ComposerStats.logic.test.ts b/apps/web/src/components/chat/ComposerStats.logic.test.ts
@@ -140,10 +141,10 @@ index 79b01fd80e..206eb9b428 100644
 +  });
 +});
 diff --git a/apps/web/src/components/chat/ComposerStats.logic.ts b/apps/web/src/components/chat/ComposerStats.logic.ts
-index 8c8236a639..7e6856ea4b 100644
+index 17d0d44b64..e9a9d1a03b 100644
 --- a/apps/web/src/components/chat/ComposerStats.logic.ts
 +++ b/apps/web/src/components/chat/ComposerStats.logic.ts
-@@ -118,6 +118,12 @@ export function selectRecordedCompactions(
+@@ -119,6 +119,12 @@ export function selectRecordedCompactions(
  
  /** Persisted provider telemetry is independent of whole-turn wall time. */
  export function deriveResponseRate(turn: OrchestrationV2ProviderTurn | null): number | null {
@@ -188,7 +189,7 @@ index 53b81a83a1..6810e9cb32 100644
                  </p>
                )}
 diff --git a/packages/client-runtime/src/state/orchestrationV2Projection.test.ts b/packages/client-runtime/src/state/orchestrationV2Projection.test.ts
-index 019239a720..aae9cb96cf 100644
+index 23c4903748..c88b251a84 100644
 --- a/packages/client-runtime/src/state/orchestrationV2Projection.test.ts
 +++ b/packages/client-runtime/src/state/orchestrationV2Projection.test.ts
 @@ -146,6 +146,7 @@ describe("applyOrchestrationV2ProjectionEvent", () => {
@@ -223,10 +224,10 @@ index 019239a720..aae9cb96cf 100644
      expect(next?.providerTurns[0]?.tokenUsage).toEqual(running.tokenUsage);
      expect(next?.providerTurns[0]?.responseThroughput).toEqual(running.responseThroughput);
 diff --git a/packages/client-runtime/src/state/orchestrationV2Projection.ts b/packages/client-runtime/src/state/orchestrationV2Projection.ts
-index 065caf4348..0720fb9c63 100644
+index b351666948..16858e7e55 100644
 --- a/packages/client-runtime/src/state/orchestrationV2Projection.ts
 +++ b/packages/client-runtime/src/state/orchestrationV2Projection.ts
-@@ -279,6 +279,16 @@ export function applyOrchestrationV2ProjectionEvent(
+@@ -300,6 +300,16 @@ export function applyOrchestrationV2ProjectionEvent(
            ...((event.payload.tokenUsage ?? current?.tokenUsage) === undefined
              ? {}
              : { tokenUsage: event.payload.tokenUsage ?? current?.tokenUsage }),
@@ -244,10 +245,10 @@ index 065caf4348..0720fb9c63 100644
              ? {}
              : {
 diff --git a/packages/contracts/src/orchestrationV2.test.ts b/packages/contracts/src/orchestrationV2.test.ts
-index 38d7959a6e..1c23701929 100644
+index 14cf89a827..f6d09f4a32 100644
 --- a/packages/contracts/src/orchestrationV2.test.ts
 +++ b/packages/contracts/src/orchestrationV2.test.ts
-@@ -1571,6 +1571,30 @@ describe("provider response throughput wire persistence", () => {
+@@ -607,6 +607,30 @@ describe("provider response throughput wire persistence", () => {
    };
    const codec = Schema.fromJsonString(OrchestrationV2ProviderTurnJson);
    const decodeTurn = Schema.decodeUnknownSync(OrchestrationV2ProviderTurnJson);
@@ -279,10 +280,10 @@ index 38d7959a6e..1c23701929 100644
      const responseThroughput = {
        outputTokens: 400,
 diff --git a/packages/contracts/src/orchestrationV2.ts b/packages/contracts/src/orchestrationV2.ts
-index d113e70da4..704fc95ef6 100644
+index 85daf9e5fc..c6c8c6f36b 100644
 --- a/packages/contracts/src/orchestrationV2.ts
 +++ b/packages/contracts/src/orchestrationV2.ts
-@@ -982,6 +982,15 @@ export const OrchestrationV2ProviderTurn = Schema.Struct({
+@@ -988,6 +988,15 @@ export const OrchestrationV2ProviderTurn = Schema.Struct({
    completedAt: Schema.NullOr(Schema.DateTimeUtc),
    tokenUsage: Schema.optional(OrchestrationV2ProviderTurnTokenUsage),
    turnTokenUsage: Schema.optional(TurnTokenUsage),
@@ -299,11 +300,11 @@ index d113e70da4..704fc95ef6 100644
    responseThroughput: Schema.optional(
      Schema.Struct({
 diff --git a/packages/provider-pi/src/server/adapter.test.ts b/packages/provider-pi/src/server/adapter.test.ts
-index 78876fcfa1..e736bf7ef9 100644
+index 9c81bab0ab..76c3c38100 100644
 --- a/packages/provider-pi/src/server/adapter.test.ts
 +++ b/packages/provider-pi/src/server/adapter.test.ts
-@@ -490,6 +490,85 @@ const expectModelFailure = (errorMessage: string) =>
-   }).pipe(Effect.scoped, Effect.provide(layerTest));
+@@ -519,6 +519,85 @@ const startTurn = Effect.fnUntraced(function* (
+ });
  
  describe("PiAdapterV2", () => {
 +  it.effect.each([false, true])(
@@ -389,7 +390,7 @@ index 78876fcfa1..e736bf7ef9 100644
      "completes a resumed user turn before native wake events arrive, Pi streaming=%s",
      (streaming) =>
 diff --git a/packages/provider-pi/src/server/adapter.ts b/packages/provider-pi/src/server/adapter.ts
-index 25c3984246..195fb8a0b6 100644
+index a2a3caf926..4a33dab0c7 100644
 --- a/packages/provider-pi/src/server/adapter.ts
 +++ b/packages/provider-pi/src/server/adapter.ts
 @@ -1,3 +1,28 @@
@@ -438,7 +439,7 @@ index 25c3984246..195fb8a0b6 100644
    readonly itemOrdinals: Map<string, number>;
    nextItemOrdinal: number;
    messageOrdinal: number;
-@@ -1210,6 +1238,30 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
+@@ -1222,6 +1250,30 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
          const method = recordString(event, "method");
          const nativeRequestId = recordString(event, "id");
          if (method === undefined) return;
@@ -469,7 +470,7 @@ index 25c3984246..195fb8a0b6 100644
          if (method === "notify") {
            const state = threadState;
            const turn = state?.activeTurn ?? null;
-@@ -1511,6 +1563,9 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
+@@ -1513,6 +1565,9 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
              status: interrupted ? "interrupted" : failure !== null ? "failed" : "completed",
              completedAt,
              ...(tokenUsage === undefined ? {} : { tokenUsage }),
