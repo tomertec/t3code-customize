@@ -78,7 +78,7 @@ index 0000000000..78c4663c48
 +  expect(entries).not.toBe(beforeSwitch);
 +});
 diff --git a/apps/web/src/hooks/useIncrementalTimelineEntries.ts b/apps/web/src/hooks/useIncrementalTimelineEntries.ts
-index 712b842631..570967cc66 100644
+index d5910d2266..9e354bdc5d 100644
 --- a/apps/web/src/hooks/useIncrementalTimelineEntries.ts
 +++ b/apps/web/src/hooks/useIncrementalTimelineEntries.ts
 @@ -1,4 +1,4 @@
@@ -87,7 +87,7 @@ index 712b842631..570967cc66 100644
  import {
    deriveTimelineEntriesFromVisibleTurnItemsWithState,
    type TimelineEntriesInput,
-@@ -26,17 +26,23 @@ export function useIncrementalTimelineEntries(
+@@ -21,17 +21,23 @@ export function useIncrementalTimelineEntries(
    threadKey: string | null,
    input: TimelineEntriesInput,
  ): TimelineEntriesProjection["entries"] {

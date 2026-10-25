@@ -14,7 +14,7 @@ Subject: [PATCH 3/9] fix(web): show compaction settings and add a stats
  6 files changed, 322 insertions(+), 26 deletions(-)
 
 diff --git a/apps/web/src/components/ChatView.tsx b/apps/web/src/components/ChatView.tsx
-index c496ab9fb6..13d61b191c 100644
+index b3018e73b8..283a23ee40 100644
 --- a/apps/web/src/components/ChatView.tsx
 +++ b/apps/web/src/components/ChatView.tsx
 @@ -1424,23 +1424,49 @@ export default function ChatView(props: ChatViewProps) {
@@ -72,7 +72,7 @@ index c496ab9fb6..13d61b191c 100644
    const pendingBackgroundTasks = deriveThreadPendingBackgroundTasks(serverProjection);
    const activeWorkStartedAt =
      deriveActiveWorkStartedAt(activeActivityRun, activeRuntime, localDispatchStartedAt) ??
-@@ -3743,7 +3769,23 @@ export default function ChatView(props: ChatViewProps) {
+@@ -3788,7 +3814,23 @@ export default function ChatView(props: ChatViewProps) {
                      </ComposerSurface.Shell>
                      {/* Opaque so timeline content scrolling under the overlay can't show through the stats line. */}
                      <div className={composerStats !== null ? "bg-background" : undefined}>
@@ -538,10 +538,10 @@ index c27ddd9a04..f83d682aa1 100644
 +  });
 +});
 diff --git a/apps/web/src/lib/contextWindow.ts b/apps/web/src/lib/contextWindow.ts
-index 32c3bb8de3..2c954e04da 100644
+index 8c449249e0..b5e9a6ac2e 100644
 --- a/apps/web/src/lib/contextWindow.ts
 +++ b/apps/web/src/lib/contextWindow.ts
-@@ -88,8 +88,13 @@ export function deriveLatestContextWindowSnapshot(
+@@ -87,8 +87,13 @@ export function deriveLatestContextWindowSnapshot(
        lastReasoningOutputTokens: null,
        toolUses: null,
        durationMs: null,
@@ -557,7 +557,7 @@ index 32c3bb8de3..2c954e04da 100644
        cost: null,
        updatedAt: liveUsage.updatedAt,
      };
-@@ -131,7 +136,7 @@ export function deriveLatestContextWindowSnapshot(
+@@ -130,7 +135,7 @@ export function deriveLatestContextWindowSnapshot(
    }
    for (let index = entries.length - 1; index >= 0; index -= 1) {
      const entry = entries[index];
@@ -566,7 +566,7 @@ index 32c3bb8de3..2c954e04da 100644
        continue;
      }
      const payload = entry.item;
-@@ -149,7 +154,7 @@ export function deriveLatestContextWindowSnapshot(
+@@ -148,7 +153,7 @@ export function deriveLatestContextWindowSnapshot(
  
      return {
        usedTokens,
@@ -575,7 +575,7 @@ index 32c3bb8de3..2c954e04da 100644
        maxTokens,
        remainingTokens,
        usedPercentage,
-@@ -165,10 +170,10 @@ export function deriveLatestContextWindowSnapshot(
+@@ -164,10 +169,10 @@ export function deriveLatestContextWindowSnapshot(
        lastReasoningOutputTokens: null,
        toolUses: null,
        durationMs: null,
