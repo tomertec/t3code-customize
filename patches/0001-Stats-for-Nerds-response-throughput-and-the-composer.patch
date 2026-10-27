@@ -15,7 +15,7 @@ Subject: [PATCH 1/9] Stats for Nerds: response throughput and the composer
  .../Adapters/CodexResponseThroughput.ts       | 150 +++++
  .../orchestration-v2/ProjectionStore.test.ts  |  37 +-
  .../src/orchestration-v2/ProjectionStore.ts   |   5 +-
- apps/web/src/components/ChatView.tsx          |  42 +-
+ apps/web/src/components/ChatView.tsx          |  40 +-
  .../chat/ComposerStats.logic.test.ts          | 439 ++++++++++++++
  .../components/chat/ComposerStats.logic.ts    | 251 ++++++++
  .../web/src/components/chat/ComposerStats.tsx | 541 ++++++++++++++++++
@@ -26,7 +26,7 @@ Subject: [PATCH 1/9] Stats for Nerds: response throughput and the composer
  .../contracts/src/orchestrationV2.test.ts     |  92 ++-
  packages/contracts/src/orchestrationV2.ts     |  10 +
  packages/contracts/src/settings.ts            |   4 +
- 21 files changed, 2788 insertions(+), 55 deletions(-)
+ 21 files changed, 2786 insertions(+), 55 deletions(-)
  create mode 100644 apps/server/src/orchestration-v2/Adapters/ClaudeResponseThroughput.test.ts
  create mode 100644 apps/server/src/orchestration-v2/Adapters/ClaudeResponseThroughput.ts
  create mode 100644 apps/server/src/orchestration-v2/Adapters/CodexResponseThroughput.test.ts
@@ -1827,7 +1827,7 @@ index ed064325bf..452d651b6f 100644
                      SELECT payload_json
                      FROM orchestration_v2_projection_provider_turns
 diff --git a/apps/web/src/components/ChatView.tsx b/apps/web/src/components/ChatView.tsx
-index 5369f2158e..e3ef67a2c9 100644
+index 5369f2158e..1accec55cc 100644
 --- a/apps/web/src/components/ChatView.tsx
 +++ b/apps/web/src/components/ChatView.tsx
 @@ -26,6 +26,7 @@ import { type TerminalLaunchContext, useChatTerminalActions } from "./chat/useCh
@@ -1838,18 +1838,16 @@ index 5369f2158e..e3ef67a2c9 100644
  import { ThreadFind, ThreadFindCanvas } from "./chat/ThreadFindProvider";
  import { closeThreadFind, openThreadFind, useThreadFindOpen } from "./chat/threadFindStore";
  import { THREAD_FIND_BAR_RESERVED_HEIGHT } from "./chat/ThreadFindBar";
-@@ -305,6 +306,10 @@ import { useProactivePanels } from "../hooks/useProactivePanels";
+@@ -305,6 +306,8 @@ import { useProactivePanels } from "../hooks/useProactivePanels";
  import { useIncrementalTimelineEntries } from "../hooks/useIncrementalTimelineEntries";
  import { useRightPanelSurfaceClose } from "../hooks/useRightPanelSurfaceClose";
  import type { ComposerBannerStackItem } from "./chat/ComposerBannerStack";
-+import { ThreadStatusLine } from "./chat/ThreadStatusLine";
-+import { formatRelativeTimeLabel, formatRelativeTimeUntilLabel } from "../timestampFormat";
 +import { ComposerStats } from "./chat/ComposerStats";
 +import { selectComposerStatsTurns, selectRecordedCompactions } from "./chat/ComposerStats.logic";
  import { ComposerSurface } from "./chat/ComposerSurface";
  import { resolveThreadSyncPhase } from "../threadSync";
  import {
-@@ -1364,6 +1369,31 @@ export default function ChatView(props: ChatViewProps) {
+@@ -1364,6 +1367,31 @@ export default function ChatView(props: ChatViewProps) {
      activeThreadLiveTokenUsage,
      activeProviderThread,
    );
@@ -1881,7 +1879,7 @@ index 5369f2158e..e3ef67a2c9 100644
    const pendingBackgroundTasks = deriveThreadPendingBackgroundTasks(serverProjection);
    const activeWorkStartedAt =
      deriveActiveWorkStartedAt(activeActivityRun, activeRuntime, localDispatchStartedAt) ??
-@@ -3633,10 +3663,14 @@ export default function ChatView(props: ChatViewProps) {
+@@ -3633,10 +3661,14 @@ export default function ChatView(props: ChatViewProps) {
                          </div>
                        </div>
                      </ComposerSurface.Shell>
