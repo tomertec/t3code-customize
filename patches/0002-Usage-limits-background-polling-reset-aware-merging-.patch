@@ -20,13 +20,13 @@ Subject: [PATCH 2/9] Usage limits: background polling, reset-aware merging and
  apps/server/src/usage/cliproxyApi.ts          |   1 +
  packages/contracts/src/providerUsageLimits.ts |  10 +
  .../src/server/managedProvider.test.ts        | 218 ++++++-
- .../src/server/managedProvider.ts             |  70 ++-
+ .../src/server/managedProvider.ts             |  71 ++-
  .../src/server/usageLimits.test.ts            | 232 ++++++-
  .../provider-core/src/server/usageLimits.ts   | 235 +++++++-
  .../provider-cursor/src/server/usageLimits.ts |   1 +
  .../provider-grok/src/server/usageLimits.ts   |   1 +
  .../src/server/usageLimits.ts                 |   3 +
- 21 files changed, 2261 insertions(+), 111 deletions(-)
+ 21 files changed, 2262 insertions(+), 111 deletions(-)
  create mode 100644 apps/server/src/provider/testing/ClaudeCapabilitiesProbe.fixture.mjs
 
 diff --git a/apps/server/src/provider/ClaudeCapabilitiesProbe.test.ts b/apps/server/src/provider/ClaudeCapabilitiesProbe.test.ts
@@ -2361,7 +2361,7 @@ index 668502f93e..8b9021bfd9 100644
 +  ).pipe(Effect.provide(layerAlwaysRunTest)),
 +);
 diff --git a/packages/provider-core/src/server/managedProvider.ts b/packages/provider-core/src/server/managedProvider.ts
-index f40baee525..e072c8b62b 100644
+index f40baee525..caa08fae37 100644
 --- a/packages/provider-core/src/server/managedProvider.ts
 +++ b/packages/provider-core/src/server/managedProvider.ts
 @@ -4,7 +4,9 @@ import {
@@ -2438,7 +2438,7 @@ index f40baee525..e072c8b62b 100644
        });
        if (snapshotToPublish !== null) {
          yield* PubSub.publish(changesPubSub, snapshotToPublish);
-@@ -235,6 +267,40 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
+@@ -235,6 +267,41 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
      return genericDemand || instanceDemand;
    });
  
@@ -2466,8 +2466,9 @@ index f40baee525..e072c8b62b 100644
 +            }
 +          }
 +        }).pipe(
-+          Effect.catchCause((cause) =>
-+            Cause.hasInterrupts(cause) ? Effect.failCause(cause) : Effect.logError(cause),
++          Effect.catchCauseIf(
++            (cause) => !Cause.hasInterrupts(cause),
++            (cause) => Effect.logError(cause),
 +          ),
 +        );
 +        const finishedAt = yield* Clock.currentTimeMillis;
