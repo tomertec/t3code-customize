@@ -60,10 +60,10 @@ index 0000000000..017a7078e8
 +  expect(renders).toBeLessThan(5);
 +});
 diff --git a/apps/web/src/components/chat/useWorktreeSetup.ts b/apps/web/src/components/chat/useWorktreeSetup.ts
-index 57589c6e95..408c324cf5 100644
+index d01cddf149..e875dc78d8 100644
 --- a/apps/web/src/components/chat/useWorktreeSetup.ts
 +++ b/apps/web/src/components/chat/useWorktreeSetup.ts
-@@ -76,8 +76,10 @@ export function useWorktreeSetup(input: {
+@@ -77,8 +77,10 @@ export function useWorktreeSetup(input: {
      readonly routeThreadRef: ScopedThreadRef;
      readonly latestSnapshot: WorktreeSetupSnapshot | null | undefined;
    }>({ routeThreadRef, latestSnapshot: null });

@@ -137,7 +137,7 @@ index 0000000000..e2dbb32328
 +  expect(observed!).toEqual({ present: false, value: null });
 +});
 diff --git a/apps/web/src/panelAnimations.ts b/apps/web/src/panelAnimations.ts
-index efbdfa526d..8eaa253942 100644
+index aee2f7a0a6..b5561ebf38 100644
 --- a/apps/web/src/panelAnimations.ts
 +++ b/apps/web/src/panelAnimations.ts
 @@ -1,4 +1,4 @@
@@ -146,7 +146,7 @@ index efbdfa526d..8eaa253942 100644
  import { type PanelAnimationDurationMs } from "@t3tools/contracts/settings";
  
  import { useMediaQuery } from "./hooks/useMediaQuery";
-@@ -45,12 +45,16 @@ export function usePanelPresence<T>(
+@@ -46,12 +46,16 @@ export function usePanelPresence<T>(
    durationMs: PanelAnimationDurationMs,
  ): { present: boolean; value: T | null } {
    const [present, setPresent] = useState(open);

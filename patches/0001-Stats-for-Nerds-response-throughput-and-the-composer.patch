@@ -19,14 +19,14 @@ Subject: [PATCH 1/9] Stats for Nerds: response throughput and the composer
  .../chat/ComposerStats.logic.test.ts          | 439 ++++++++++++++
  .../components/chat/ComposerStats.logic.ts    | 251 ++++++++
  .../web/src/components/chat/ComposerStats.tsx | 541 ++++++++++++++++++
- .../components/settings/SettingsPanels.tsx    | 309 +++++-----
+ .../components/settings/SettingsPanels.tsx    |  39 +-
  .../src/components/settings/settingsSearch.ts |   6 +
  .../state/orchestrationV2Projection.test.ts   |  13 +
  .../src/state/orchestrationV2Projection.ts    |  15 +-
  .../contracts/src/orchestrationV2.test.ts     |  92 ++-
  packages/contracts/src/orchestrationV2.ts     |  10 +
  packages/contracts/src/settings.ts            |   4 +
- 21 files changed, 2929 insertions(+), 184 deletions(-)
+ 21 files changed, 2788 insertions(+), 55 deletions(-)
  create mode 100644 apps/server/src/orchestration-v2/Adapters/ClaudeResponseThroughput.test.ts
  create mode 100644 apps/server/src/orchestration-v2/Adapters/ClaudeResponseThroughput.ts
  create mode 100644 apps/server/src/orchestration-v2/Adapters/CodexResponseThroughput.test.ts
@@ -36,7 +36,7 @@ Subject: [PATCH 1/9] Stats for Nerds: response throughput and the composer
  create mode 100644 apps/web/src/components/chat/ComposerStats.tsx
 
 diff --git a/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts b/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts
-index 9dc129c7aa..717aab1286 100644
+index 8de0f78af8..0985dbf3bc 100644
 --- a/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts
 +++ b/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts
 @@ -3,6 +3,7 @@ import * as NodeEvents from "node:events";
@@ -47,7 +47,7 @@ index 9dc129c7aa..717aab1286 100644
  
  import * as ClaudeSdk from "@anthropic-ai/claude-agent-sdk";
  import { beforeEach, vi } from "vite-plus/test";
-@@ -3454,6 +3455,205 @@ describe("ClaudeAdapterV2 background wake turns", () => {
+@@ -4302,6 +4303,205 @@ describe("ClaudeAdapterV2 background wake turns", () => {
        ),
    );
  
@@ -254,27 +254,28 @@ index 9dc129c7aa..717aab1286 100644
      "projects Claude thinking blocks when %s",
      (status) =>
 diff --git a/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts b/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts
-index d3cd67a359..8ec8bf17ba 100644
+index b66e85e14d..d68cc126c5 100644
 --- a/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts
 +++ b/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts
-@@ -1,3 +1,5 @@
+@@ -1,4 +1,6 @@
+ import * as DocumentText from "../../provider/DocumentText.ts";
 +import { ClaudeResponseThroughput, observeClaudeFrame } from "./ClaudeResponseThroughput.ts";
 +
  import { makeProviderTextDeltaCoalescer } from "./ProviderTextDeltaCoalescer.ts";
  import { claudeTaskOutputRoot, tailClaudeTaskOutput } from "./ClaudeTaskOutputTail.ts";
  import {
-@@ -1007,6 +1009,10 @@ export const layerQueryRunner: Layer.Layer<
-           messages: Stream.fromAsyncIterable(claudeQueryMessages(queryRuntime), (cause) =>
-             queryRunnerError(cause, "fromAsyncIterable"),
-           ).pipe(
-+            Stream.map((message) => {
-+              observeClaudeFrame(message);
-+              return message;
-+            }),
-             Stream.tap((message) =>
-               logProtocolEvent({
-                 direction: "incoming",
-@@ -3411,6 +3417,7 @@ function formatClaudeUsageLimitWait(waitMs: number): string {
+@@ -1083,6 +1085,10 @@ export const layerQueryRunner: Layer.Layer<
+             messages: Stream.fromAsyncIterable(claudeQueryMessages(queryRuntime), (cause) =>
+               queryRunnerError(cause, "fromAsyncIterable"),
+             ).pipe(
++              Stream.map((message) => {
++                observeClaudeFrame(message);
++                return message;
++              }),
+               Stream.tap((message) =>
+                 logProtocolEvent({
+                   direction: "incoming",
+@@ -3729,6 +3735,7 @@ function formatClaudeUsageLimitWait(waitMs: number): string {
  
  interface ActiveClaudeTurnContext {
    readonly queryPolicy: ClaudeRuntimeQueryPolicy;
@@ -282,7 +283,7 @@ index d3cd67a359..8ec8bf17ba 100644
    readonly input: ProviderAdapter.ProviderAdapterV2TurnInput;
    readonly nativeThreadId: string;
    readonly nativeTurnId: string;
-@@ -4895,6 +4902,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+@@ -5255,6 +5262,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
              return ordinal;
            });
  
@@ -291,7 +292,7 @@ index d3cd67a359..8ec8bf17ba 100644
          const providerTurnPayload = (input: {
            readonly context: ActiveClaudeTurnContext;
            readonly status: OrchestrationV2ProviderTurn["status"];
-@@ -4913,6 +4922,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+@@ -5273,6 +5282,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
            status: input.status,
            startedAt: input.context.startedAt,
            completedAt: input.completedAt,
@@ -301,7 +302,7 @@ index d3cd67a359..8ec8bf17ba 100644
          });
  
          const buildToolCallArtifacts = (input: {
-@@ -6846,6 +6858,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+@@ -7206,6 +7218,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                    failure: null,
                    threadDisposition,
                  };
@@ -309,7 +310,7 @@ index d3cd67a359..8ec8bf17ba 100644
            yield* Effect.all(
              [
                emitProviderEvent({
-@@ -7647,6 +7660,21 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+@@ -8008,6 +8021,21 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
            }
            yield* trackClaudeGoal({ nativeThreadId: liveQuery.nativeThreadId, context, message });
  
@@ -331,7 +332,7 @@ index d3cd67a359..8ec8bf17ba 100644
            if (message.type === "stream_event" && !message.parent_tool_use_id) {
              const event = message.event;
              const reasoning = context.reasoning;
-@@ -9421,8 +9449,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+@@ -9813,8 +9841,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
            };
            yield* Ref.set(queryContext, context);
            yield* querySession.messages.pipe(
@@ -344,7 +345,7 @@ index d3cd67a359..8ec8bf17ba 100644
                  Effect.suspend(() => {
                    if (
                      message.type === "system" &&
-@@ -9442,8 +9472,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+@@ -9834,8 +9864,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                    }
                    return handleSdkMessage({ query: querySession, message });
                  }),
@@ -355,8 +356,8 @@ index d3cd67a359..8ec8bf17ba 100644
              Effect.exit,
              Effect.flatMap(
                Effect.fnUntraced(function* (exit: ClaudeQueryStreamExit) {
-@@ -9536,6 +9566,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
-                   });
+@@ -9942,6 +9972,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+                   );
              const querySession = yield* openQuery(turnInput, nativeThreadId);
              const context: ActiveClaudeTurnContext = {
 +              responseThroughput: new ClaudeResponseThroughput(),
@@ -761,7 +762,7 @@ index 0000000000..4e2ee18122
 +  }
 +}
 diff --git a/apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.test.ts b/apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.test.ts
-index bd7b6f4208..8e84478641 100644
+index 602e1a4d56..913954137e 100644
 --- a/apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.test.ts
 +++ b/apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.test.ts
 @@ -915,6 +915,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
@@ -1022,15 +1023,16 @@ index bd7b6f4208..8e84478641 100644
      Effect.scoped(
        Effect.gen(function* () {
 diff --git a/apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts b/apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts
-index 21c9943b41..7be62fa2da 100644
+index 6dba639b63..f6a9ed8fea 100644
 --- a/apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts
 +++ b/apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts
-@@ -1,3 +1,4 @@
+@@ -1,4 +1,5 @@
+ import * as DocumentText from "../../provider/DocumentText.ts";
 +import { CodexResponseThroughput } from "./CodexResponseThroughput.ts";
  import { revertCodexThread } from "../../provider/CodexThreadRevert.ts";
  import { historyResponseItems } from "@t3tools/provider-core/server/handoffBudget";
  import { makeProviderTextDeltaCoalescer } from "./ProviderTextDeltaCoalescer.ts";
-@@ -22,6 +23,7 @@ import {
+@@ -23,6 +24,7 @@ import {
  } from "../../provider/CodexProvider.ts";
  import {
    codexRateLimitsToUpdate,
@@ -1038,7 +1040,7 @@ index 21c9943b41..7be62fa2da 100644
    mergeCodexRateLimits,
    codexUsageLimitResetAt,
    type CodexRateLimitSnapshot,
-@@ -68,6 +70,7 @@ import type {
+@@ -71,6 +73,7 @@ import type {
    ProviderThreadId,
    ProviderTurnId,
    ProviderInstanceId,
@@ -1046,7 +1048,7 @@ index 21c9943b41..7be62fa2da 100644
    RuntimeMode,
    RuntimeRequestId,
    ThreadId,
-@@ -1133,6 +1136,7 @@ function withCodexManagedFailure(
+@@ -1110,6 +1113,7 @@ function withCodexManagedFailure(
  
  interface ActiveCodexTurnContext {
    closedCommandItemIds?: ReadonlySet<string>;
@@ -1054,7 +1056,7 @@ index 21c9943b41..7be62fa2da 100644
    latestProviderFailure?: {
      readonly nativeMessage: string;
      readonly nativeCode: string | null;
-@@ -1591,7 +1595,10 @@ export type CodexAdapterV2DriverEnv =
+@@ -1527,7 +1531,10 @@ export type CodexAdapterV2DriverEnv =
  
  export const createCodexAdapterV2 = Effect.fn("CodexAdapterV2.createCodexAdapterV2")(function* (
    { instanceId, environment, enabled, config }: ProviderAdapterDriverCreateInput<CodexSettings>,
@@ -1066,8 +1068,8 @@ index 21c9943b41..7be62fa2da 100644
  ) {
    const clientFactory = yield* CodexAppServerClientFactory;
    const continuationRequests = yield* ProviderContinuationRequests.ProviderContinuationRequests;
-@@ -1677,6 +1684,9 @@ const layer: Layer.Layer<
- );
+@@ -1579,6 +1586,9 @@ export const CodexAdapterV2Driver: ProviderAdapterDriver<CodexSettings, CodexAda
+ };
  
  export interface CodexAdapterV2Options {
 +  readonly registerUsageLimitsReader?: (
@@ -1076,7 +1078,7 @@ index 21c9943b41..7be62fa2da 100644
    readonly instanceId: ProviderInstanceId;
    readonly settings: CodexSettings;
    readonly environment: NodeJS.ProcessEnv;
-@@ -1802,6 +1812,23 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
+@@ -1709,6 +1719,23 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
              yield* Ref.set(initialized, true);
            }),
          );
@@ -1100,7 +1102,7 @@ index 21c9943b41..7be62fa2da 100644
          const now = yield* DateTime.now;
          const session = providerSession({
            providerSessionId: input.providerSessionId,
-@@ -2008,6 +2035,9 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
+@@ -1929,6 +1956,9 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
              itemParentNodeId: input.turnInput.rootNodeId,
              rootNodeId: input.turnInput.rootNodeId,
              subagent: null,
@@ -1110,7 +1112,7 @@ index 21c9943b41..7be62fa2da 100644
              startedAt: input.startedAt,
              itemPositions: new Map(),
              fileChangeKindsByItem: new Map(),
-@@ -3325,12 +3355,15 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
+@@ -3250,12 +3280,15 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
            return key;
          };
          const appendReasoning = Effect.fn("CodexAdapterV2.appendReasoning")(function* (
@@ -1127,7 +1129,7 @@ index 21c9943b41..7be62fa2da 100644
            yield* completeProviderRetry(context, yield* DateTime.now);
            const itemId = reasoningPartKey(payload.turnId, payload.itemId, stream, index);
            // Reserve positions before delayed flushes so later tools stay after them.
-@@ -4056,6 +4089,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
+@@ -3981,6 +4014,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
            readonly appName?: string;
            readonly options?: ReadonlyArray<ProviderApprovalOption>;
          }) {
@@ -1135,7 +1137,7 @@ index 21c9943b41..7be62fa2da 100644
            const createdAt = yield* DateTime.now;
            const { owner, subagent } = approvalOwnerCodexTurn(input.context);
            const parentNodeId =
-@@ -4151,6 +4185,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
+@@ -4076,6 +4110,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
            readonly questions: ReadonlyArray<CodexSchema.ToolRequestUserInputParams__ToolRequestUserInputQuestion>;
            readonly responseMode?: "message";
          }) {
@@ -1143,7 +1145,7 @@ index 21c9943b41..7be62fa2da 100644
            const createdAt = yield* DateTime.now;
            const requestId = yield* idAllocator.allocate.runtimeRequest({
              driver: CODEX_PROVIDER,
-@@ -4240,10 +4275,16 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
+@@ -4165,10 +4200,16 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
            return { node, request, turnItem };
          });
  
@@ -1162,7 +1164,7 @@ index 21c9943b41..7be62fa2da 100644
                yield* completeProviderRetry(context, yield* DateTime.now);
              }
              yield* agentMessageDeltas.append({
-@@ -4251,8 +4292,8 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
+@@ -4176,8 +4217,8 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                itemId: payload.itemId,
                delta: payload.delta,
              });
@@ -1173,7 +1175,7 @@ index 21c9943b41..7be62fa2da 100644
  
          yield* client.handleServerNotification("item/commandExecution/outputDelta", (payload) =>
            Effect.gen(function* () {
-@@ -4275,33 +4316,41 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
+@@ -4200,33 +4241,41 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
          );
  
          yield* client.handleServerNotification("item/reasoning/summaryTextDelta", (payload) =>
@@ -1223,7 +1225,7 @@ index 21c9943b41..7be62fa2da 100644
              yield* completeProviderRetry(context, yield* DateTime.now);
              const steps = payload.plan.map((step, index) => ({
                id: `step-${index + 1}`,
-@@ -4331,8 +4380,8 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
+@@ -4256,8 +4305,8 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                driver: CODEX_PROVIDER,
                turnItem: artifacts.turnItem,
              });
@@ -1234,7 +1236,7 @@ index 21c9943b41..7be62fa2da 100644
  
          yield* client.handleServerNotification("account/rateLimits/updated", (payload) =>
            Effect.gen(function* () {
-@@ -4364,6 +4413,29 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
+@@ -4289,6 +4338,29 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
            }).pipe(Effect.orDie),
          );
  
@@ -1264,7 +1266,7 @@ index 21c9943b41..7be62fa2da 100644
          yield* client.handleServerNotification("thread/tokenUsage/updated", (payload) =>
            Effect.gen(function* () {
              accumulateCodexTurnTokenUsage(
-@@ -4677,13 +4749,17 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
+@@ -4602,13 +4674,17 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
            }).pipe(Effect.orDie, turnTerminalizationPermit.withPermits(1)),
          );
  
@@ -1284,7 +1286,7 @@ index 21c9943b41..7be62fa2da 100644
              if (payload.item.type === "contextCompaction") {
                yield* emitCompactionItem(
                  context,
-@@ -4807,11 +4883,12 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
+@@ -4732,11 +4808,12 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                driver: CODEX_PROVIDER,
                turnItem: artifacts.turnItem,
              });
@@ -1301,7 +1303,7 @@ index 21c9943b41..7be62fa2da 100644
              if (payload.item.type === "contextCompaction")
                // Fork requests off the notification reader so it can read their responses.
                yield* restoreAdditionalContext(payload.threadId).pipe(
-@@ -4837,6 +4914,12 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
+@@ -4762,6 +4839,12 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                return;
              }
              const { context, settled } = resolved;
@@ -1314,7 +1316,7 @@ index 21c9943b41..7be62fa2da 100644
  
              if (payload.item.type === "reasoning") {
                yield* completeReasoning(payload.turnId, payload.item);
-@@ -5108,8 +5191,8 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
+@@ -5033,8 +5116,8 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                  result: text,
                });
              }
@@ -1325,7 +1327,7 @@ index 21c9943b41..7be62fa2da 100644
  
          yield* client.handleServerRequest("item/commandExecution/requestApproval", (payload) =>
            Effect.gen(function* () {
-@@ -5893,6 +5976,15 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
+@@ -5865,6 +5948,15 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                    input.completedAt,
                  );
                }
@@ -1341,7 +1343,7 @@ index 21c9943b41..7be62fa2da 100644
                const nativeThreadId = input.context.providerThread.nativeThreadRef?.nativeId;
                const activation =
                  nativeThreadId == null ? undefined : goalActivations.get(nativeThreadId);
-@@ -5917,14 +6009,8 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
+@@ -5889,14 +5981,8 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                  status: input.status,
                  startedAt: input.context.startedAt,
                  completedAt: input.completedAt,
@@ -1724,7 +1726,7 @@ index 0000000000..1df8c44435
 +  }
 +}
 diff --git a/apps/server/src/orchestration-v2/ProjectionStore.test.ts b/apps/server/src/orchestration-v2/ProjectionStore.test.ts
-index a8dedfeec2..e56d97ae7a 100644
+index 7f70a2ec25..3a16b56d48 100644
 --- a/apps/server/src/orchestration-v2/ProjectionStore.test.ts
 +++ b/apps/server/src/orchestration-v2/ProjectionStore.test.ts
 @@ -1423,6 +1423,13 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
@@ -1802,7 +1804,7 @@ index a8dedfeec2..e56d97ae7a 100644
    );
  
 diff --git a/apps/server/src/orchestration-v2/ProjectionStore.ts b/apps/server/src/orchestration-v2/ProjectionStore.ts
-index 700395facd..627c5fb724 100644
+index ed064325bf..452d651b6f 100644
 --- a/apps/server/src/orchestration-v2/ProjectionStore.ts
 +++ b/apps/server/src/orchestration-v2/ProjectionStore.ts
 @@ -751,6 +751,9 @@ function upsertProviderTurn(
@@ -1815,7 +1817,7 @@ index 700395facd..627c5fb724 100644
    });
  }
  
-@@ -2444,7 +2447,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
+@@ -2448,7 +2451,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
              }
              case "provider-turn.updated": {
                const existingRows =
@@ -1825,20 +1827,20 @@ index 700395facd..627c5fb724 100644
                      SELECT payload_json
                      FROM orchestration_v2_projection_provider_turns
 diff --git a/apps/web/src/components/ChatView.tsx b/apps/web/src/components/ChatView.tsx
-index 1319b1030b..b3018e73b8 100644
+index 5369f2158e..e3ef67a2c9 100644
 --- a/apps/web/src/components/ChatView.tsx
 +++ b/apps/web/src/components/ChatView.tsx
-@@ -19,6 +19,7 @@ import { type TerminalLaunchContext, useChatTerminalActions } from "./chat/useCh
+@@ -26,6 +26,7 @@ import { type TerminalLaunchContext, useChatTerminalActions } from "./chat/useCh
  import { useComposerSend } from "./chat/useComposerSend";
  import { useComposerResume } from "./chat/useComposerResume";
  import { useImplementPlanInNewThread } from "./chat/useProposedPlanSend";
 +import { useMemo } from "react";
- import { ThreadFind, ThreadFindCanvas, type ThreadFindControls } from "./chat/ThreadFindProvider";
+ import { ThreadFind, ThreadFindCanvas } from "./chat/ThreadFindProvider";
+ import { closeThreadFind, openThreadFind, useThreadFindOpen } from "./chat/threadFindStore";
  import { THREAD_FIND_BAR_RESERVED_HEIGHT } from "./chat/ThreadFindBar";
- import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
-@@ -302,6 +303,10 @@ import { useIncrementalTimelineEntries } from "../hooks/useIncrementalTimelineEn
+@@ -305,6 +306,10 @@ import { useProactivePanels } from "../hooks/useProactivePanels";
+ import { useIncrementalTimelineEntries } from "../hooks/useIncrementalTimelineEntries";
  import { useRightPanelSurfaceClose } from "../hooks/useRightPanelSurfaceClose";
- import { useAgentOpenedPreviews } from "./preview/useAgentOpenedPreviews";
  import type { ComposerBannerStackItem } from "./chat/ComposerBannerStack";
 +import { ThreadStatusLine } from "./chat/ThreadStatusLine";
 +import { formatRelativeTimeLabel, formatRelativeTimeUntilLabel } from "../timestampFormat";
@@ -1847,7 +1849,7 @@ index 1319b1030b..b3018e73b8 100644
  import { ComposerSurface } from "./chat/ComposerSurface";
  import { resolveThreadSyncPhase } from "../threadSync";
  import {
-@@ -1411,6 +1416,31 @@ export default function ChatView(props: ChatViewProps) {
+@@ -1364,6 +1369,31 @@ export default function ChatView(props: ChatViewProps) {
      activeThreadLiveTokenUsage,
      activeProviderThread,
    );
@@ -1879,7 +1881,7 @@ index 1319b1030b..b3018e73b8 100644
    const pendingBackgroundTasks = deriveThreadPendingBackgroundTasks(serverProjection);
    const activeWorkStartedAt =
      deriveActiveWorkStartedAt(activeActivityRun, activeRuntime, localDispatchStartedAt) ??
-@@ -3756,10 +3786,14 @@ export default function ChatView(props: ChatViewProps) {
+@@ -3633,10 +3663,14 @@ export default function ChatView(props: ChatViewProps) {
                          </div>
                        </div>
                      </ComposerSurface.Shell>
@@ -3148,306 +3150,50 @@ index 0000000000..025f57253e
 +  );
 +}
 diff --git a/apps/web/src/components/settings/SettingsPanels.tsx b/apps/web/src/components/settings/SettingsPanels.tsx
-index adb29f1782..27e75e41bb 100644
+index a9594cb089..3de33e2948 100644
 --- a/apps/web/src/components/settings/SettingsPanels.tsx
 +++ b/apps/web/src/components/settings/SettingsPanels.tsx
-@@ -3,7 +3,8 @@ import { NotificationSettings } from "./NotificationSettings";
+@@ -2,7 +2,7 @@ import { NotificationSettings } from "./NotificationSettings";
  import { PRIVACY_POLICY_URL } from "../../legalLinks";
- import { CheckIcon, ChevronRightIcon } from "lucide-react";
+ import { CheckIcon } from "lucide-react";
  import { Link, useNavigate } from "@tanstack/react-router";
--import { useEffect, useRef, useState } from "react";
-+import type { CSSProperties, ReactNode } from "react";
-+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
+-import { useRef, useState } from "react";
++import { useMemo, useRef, useState } from "react";
  import {
    type DesktopUpdateChannel,
    IDLE_COMPACTION_MODES,
-@@ -394,137 +395,154 @@ export function useSettingsRestore(onRestored?: () => void) {
+@@ -393,7 +393,8 @@ export function useSettingsRestore(onRestored?: () => void) {
    );
    const isBackgroundActivityDirty = hasChangedBackgroundActivitySettings(settings);
  
 -  const changedSettingLabels = [
--    ...(theme !== "system" ? ["Theme"] : []),
--    ...(!followSystem ? ["Follow system"] : []),
--    ...(themeHalves !== null ? ["Theme mix"] : []),
--    ...(settings.appearanceContrast !== DEFAULT_UNIFIED_SETTINGS.appearanceContrast
--      ? ["Contrast"]
--      : []),
--    ...(settings.glassOpacity !== DEFAULT_UNIFIED_SETTINGS.glassOpacity ? ["Glass opacity"] : []),
--    ...(settings.diffColorScheme !== DEFAULT_UNIFIED_SETTINGS.diffColorScheme
--      ? ["Diff colors"]
--      : []),
--    ...(settings.chatWidth !== DEFAULT_UNIFIED_SETTINGS.chatWidth ? ["Chat width"] : []),
--    ...(settings.mathRenderingEnabled !== DEFAULT_UNIFIED_SETTINGS.mathRenderingEnabled
--      ? ["Render math"]
--      : []),
--    ...(settings.panelAnimationDurationMs !== DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs
--      ? ["Panel animations"]
--      : []),
--    ...(settings.environmentIdentificationMode !==
--    DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode
--      ? ["Environment identification"]
--      : []),
--    ...(settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat
--      ? ["Time format"]
--      : []),
--    ...(settings.notificationMode !== DEFAULT_UNIFIED_SETTINGS.notificationMode
--      ? ["Thread notifications"]
--      : []),
--    ...(settings.inAppNotificationsEnabled !== DEFAULT_UNIFIED_SETTINGS.inAppNotificationsEnabled
--      ? ["In-app notifications"]
--      : []),
--    ...(settings.sidebarThreadPreviewCount !== DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount
--      ? ["Visible threads"]
--      : []),
--    ...(settings.sidebarProjectGroupingMode !== DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode
--      ? ["Project Grouping"]
--      : []),
--    ...(settings.sidebarProjectSortOrder !== DEFAULT_UNIFIED_SETTINGS.sidebarProjectSortOrder
--      ? ["Project order"]
--      : []),
--    ...(settings.sidebarWorkingShelfEnabled !== DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfEnabled
--      ? ["Working section"]
--      : []),
--    ...(settings.sidebarAutoSettleAfterDays !== DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays
--      ? ["Auto-settle inactive threads"]
--      : []),
--    ...(settings.sidebarAutoSettleKeepPullRequests !==
--    DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleKeepPullRequests
--      ? ["Keep threads with a PR"]
--      : []),
--    ...(settings.sidebarAutoSettleOnMerge !== DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge
--      ? ["Auto-settle merged threads"]
--      : []),
--    ...(settings.autoResumeLimitedThreads !== DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads
--      ? ["Auto-resume limited threads"]
--      : []),
--    ...(settings.snoozeLimitedThreads !== DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads
--      ? ["Snooze limited threads"]
--      : []),
--    ...(settings.wordWrap !== DEFAULT_UNIFIED_SETTINGS.wordWrap ? ["Word wrap"] : []),
--    ...(settings.persistComposerContextStrip !==
--    DEFAULT_UNIFIED_SETTINGS.persistComposerContextStrip
--      ? ["Composer context"]
--      : []),
--    ...getChangedTypographySettingLabels(settings),
--    ...(settings.diffFilesCollapsed !== DEFAULT_UNIFIED_SETTINGS.diffFilesCollapsed
--      ? ["Default diff file state"]
--      : []),
--    ...(settings.diffIgnoreWhitespace !== DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace
--      ? ["Diff whitespace changes"]
--      : []),
--    ...(settings.diffLayout !== DEFAULT_UNIFIED_SETTINGS.diffLayout ? ["Diff layout"] : []),
--    ...(settings.proactivePanelsEnabled !== DEFAULT_UNIFIED_SETTINGS.proactivePanelsEnabled
--      ? ["Proactive panels"]
--      : []),
--    ...(settings.showSkillsInSlashMenu !== DEFAULT_UNIFIED_SETTINGS.showSkillsInSlashMenu
--      ? ["Show skills in slash menu"]
--      : []),
--    ...(settings.composerCollapseOnScroll !== DEFAULT_UNIFIED_SETTINGS.composerCollapseOnScroll
--      ? ["Collapse composer on scroll"]
--      : []),
--    ...(settings.composerRichTextEnabled !== DEFAULT_UNIFIED_SETTINGS.composerRichTextEnabled
--      ? ["Rich text composer"]
--      : []),
--    ...(settings.sendShortcut !== DEFAULT_UNIFIED_SETTINGS.sendShortcut ? ["Send shortcut"] : []),
--    ...(settings.followUpBehavior !== DEFAULT_UNIFIED_SETTINGS.followUpBehavior
--      ? ["Follow-up behavior"]
--      : []),
--    ...(settings.contextWindowMeterEnabled !== DEFAULT_UNIFIED_SETTINGS.contextWindowMeterEnabled
--      ? ["Context window indicator"]
--      : []),
--    ...(settings.responseStreamingMode !== DEFAULT_UNIFIED_SETTINGS.responseStreamingMode
--      ? ["Response streaming"]
--      : []),
--    ...(settings.enableProviderUpdateChecks !== DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks
--      ? ["Provider update checks"]
--      : []),
--    ...(settings.continueThreadsAfterServerUpdate !==
--    DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate
--      ? ["Continue threads after restarts"]
--      : []),
--    ...(isBackgroundActivityDirty ? ["Background activity"] : []),
--    ...(settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode
--      ? ["New thread mode"]
--      : []),
--    ...(settings.newWorktreesStartFromOrigin !==
--    DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin
--      ? ["New worktrees start from remote"]
--      : []),
--    ...(settings.addProjectBaseDirectory !== DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory
--      ? ["Add project base directory"]
--      : []),
--    ...(settings.confirmThreadUnpin !== DEFAULT_UNIFIED_SETTINGS.confirmThreadUnpin
--      ? ["Unpin confirmation"]
--      : []),
--    ...(settings.confirmThreadArchive !== DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive
--      ? ["Archive confirmation"]
--      : []),
--    ...(settings.confirmThreadDelete !== DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete
--      ? ["Delete confirmation"]
--      : []),
--    ...(settings.confirmQuit !== DEFAULT_UNIFIED_SETTINGS.confirmQuit ? ["Quit shortcut"] : []),
--    ...(isTextGenerationModelDirty ? ["Text generation model"] : []),
--    ...(settings.threadTitleInstructions !== DEFAULT_UNIFIED_SETTINGS.threadTitleInstructions
--      ? ["Thread title instructions"]
--      : []),
--    ...getChangedBrowserSettingLabels(settings),
--    ...(settings.enableAgentBrowserAccess !== DEFAULT_UNIFIED_SETTINGS.enableAgentBrowserAccess
--      ? ["Agent browser access"]
--      : []),
--  ];
 +  const changedSettingLabels = useMemo(
 +    () => [
-+      ...(theme !== "system" ? ["Theme"] : []),
-+      ...(!followSystem ? ["Follow system"] : []),
-+      ...(themeHalves !== null ? ["Theme mix"] : []),
-+      ...(settings.appearanceContrast !== DEFAULT_UNIFIED_SETTINGS.appearanceContrast
-+        ? ["Contrast"]
-+        : []),
-+      ...(settings.glassOpacity !== DEFAULT_UNIFIED_SETTINGS.glassOpacity ? ["Glass opacity"] : []),
-+      ...(settings.diffColorScheme !== DEFAULT_UNIFIED_SETTINGS.diffColorScheme
-+        ? ["Diff colors"]
-+        : []),
-+      ...(settings.chatWidth !== DEFAULT_UNIFIED_SETTINGS.chatWidth ? ["Chat width"] : []),
-+      ...(settings.mathRenderingEnabled !== DEFAULT_UNIFIED_SETTINGS.mathRenderingEnabled
-+        ? ["Render math"]
-+        : []),
-+      ...(settings.panelAnimationDurationMs !== DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs
-+        ? ["Panel animations"]
-+        : []),
-+      ...(settings.environmentIdentificationMode !==
-+      DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode
-+        ? ["Environment identification"]
-+        : []),
-+      ...(settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat
-+        ? ["Time format"]
-+        : []),
-+      ...(settings.notificationMode !== DEFAULT_UNIFIED_SETTINGS.notificationMode
-+        ? ["Thread notifications"]
-+        : []),
-+      ...(settings.inAppNotificationsEnabled !== DEFAULT_UNIFIED_SETTINGS.inAppNotificationsEnabled
-+        ? ["In-app notifications"]
-+        : []),
-+      ...(settings.sidebarThreadPreviewCount !== DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount
-+        ? ["Visible threads"]
-+        : []),
-+      ...(settings.sidebarProjectGroupingMode !==
-+      DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode
-+        ? ["Project Grouping"]
-+        : []),
-+      ...(settings.sidebarProjectSortOrder !== DEFAULT_UNIFIED_SETTINGS.sidebarProjectSortOrder
-+        ? ["Project order"]
-+        : []),
-+      ...(settings.sidebarWorkingShelfEnabled !==
-+      DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfEnabled
-+        ? ["Working section"]
-+        : []),
-+      ...(settings.sidebarAutoSettleAfterDays !==
-+      DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays
-+        ? ["Auto-settle inactive threads"]
-+        : []),
-+      ...(settings.sidebarAutoSettleKeepPullRequests !==
-+      DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleKeepPullRequests
-+        ? ["Keep threads with a PR"]
-+        : []),
-+      ...(settings.sidebarAutoSettleOnMerge !== DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge
-+        ? ["Auto-settle merged threads"]
-+        : []),
-+      ...(settings.autoResumeLimitedThreads !== DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads
-+        ? ["Auto-resume limited threads"]
-+        : []),
-+      ...(settings.snoozeLimitedThreads !== DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads
-+        ? ["Snooze limited threads"]
-+        : []),
-+      ...(settings.wordWrap !== DEFAULT_UNIFIED_SETTINGS.wordWrap ? ["Word wrap"] : []),
-+      ...(settings.persistComposerContextStrip !==
-+      DEFAULT_UNIFIED_SETTINGS.persistComposerContextStrip
-+        ? ["Composer context"]
-+        : []),
-+      ...getChangedTypographySettingLabels(settings),
-+      ...(settings.diffFilesCollapsed !== DEFAULT_UNIFIED_SETTINGS.diffFilesCollapsed
-+        ? ["Default diff file state"]
-+        : []),
-+      ...(settings.diffIgnoreWhitespace !== DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace
-+        ? ["Diff whitespace changes"]
-+        : []),
-+      ...(settings.diffLayout !== DEFAULT_UNIFIED_SETTINGS.diffLayout ? ["Diff layout"] : []),
-+      ...(settings.proactivePanelsEnabled !== DEFAULT_UNIFIED_SETTINGS.proactivePanelsEnabled
-+        ? ["Proactive panels"]
-+        : []),
-+      ...(settings.showSkillsInSlashMenu !== DEFAULT_UNIFIED_SETTINGS.showSkillsInSlashMenu
-+        ? ["Show skills in slash menu"]
-+        : []),
-+      ...(settings.composerCollapseOnScroll !== DEFAULT_UNIFIED_SETTINGS.composerCollapseOnScroll
-+        ? ["Collapse composer on scroll"]
-+        : []),
-+      ...(settings.composerRichTextEnabled !== DEFAULT_UNIFIED_SETTINGS.composerRichTextEnabled
-+        ? ["Rich text composer"]
-+        : []),
-+      ...(settings.sendShortcut !== DEFAULT_UNIFIED_SETTINGS.sendShortcut ? ["Send shortcut"] : []),
-+      ...(settings.followUpBehavior !== DEFAULT_UNIFIED_SETTINGS.followUpBehavior
-+        ? ["Follow-up behavior"]
-+        : []),
-+      ...(settings.statsForNerdsEnabled !== DEFAULT_UNIFIED_SETTINGS.statsForNerdsEnabled
-+        ? ["Stats for nerds"]
-+        : []),
-+      ...(settings.contextWindowMeterEnabled !== DEFAULT_UNIFIED_SETTINGS.contextWindowMeterEnabled
-+        ? ["Context window indicator"]
-+        : []),
-+      ...(settings.responseStreamingMode !== DEFAULT_UNIFIED_SETTINGS.responseStreamingMode
-+        ? ["Response streaming"]
-+        : []),
-+      ...(settings.enableProviderUpdateChecks !==
-+      DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks
-+        ? ["Provider update checks"]
-+        : []),
-+      ...(settings.continueThreadsAfterServerUpdate !==
-+      DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate
-+        ? ["Continue threads after restarts"]
-+        : []),
-+      ...(isBackgroundActivityDirty ? ["Background activity"] : []),
-+      ...(settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode
-+        ? ["New thread mode"]
-+        : []),
-+      ...(settings.newWorktreesStartFromOrigin !==
-+      DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin
-+        ? ["New worktrees start from remote"]
-+        : []),
-+      ...(settings.addProjectBaseDirectory !== DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory
-+        ? ["Add project base directory"]
-+        : []),
-+      ...(settings.confirmThreadUnpin !== DEFAULT_UNIFIED_SETTINGS.confirmThreadUnpin
-+        ? ["Unpin confirmation"]
-+        : []),
-+      ...(settings.confirmThreadArchive !== DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive
-+        ? ["Archive confirmation"]
-+        : []),
-+      ...(settings.confirmThreadDelete !== DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete
-+        ? ["Delete confirmation"]
-+        : []),
-+      ...(settings.confirmQuit !== DEFAULT_UNIFIED_SETTINGS.confirmQuit ? ["Quit shortcut"] : []),
-+      ...(isTextGenerationModelDirty ? ["Text generation model"] : []),
-+      ...(settings.threadTitleInstructions !== DEFAULT_UNIFIED_SETTINGS.threadTitleInstructions
-+        ? ["Thread title instructions"]
-+        : []),
-+      ...getChangedBrowserSettingLabels(settings),
-+      ...(settings.enableAgentBrowserAccess !== DEFAULT_UNIFIED_SETTINGS.enableAgentBrowserAccess
-+        ? ["Agent browser access"]
-+        : []),
+     ...(theme !== "system" ? ["Theme"] : []),
+     ...(!followSystem ? ["Follow system"] : []),
+     ...(themeHalves !== null ? ["Theme mix"] : []),
+@@ -481,6 +482,9 @@ export function useSettingsRestore(onRestored?: () => void) {
+     ...(settings.followUpBehavior !== DEFAULT_UNIFIED_SETTINGS.followUpBehavior
+       ? ["Follow-up behavior"]
+       : []),
++    ...(settings.statsForNerdsEnabled !== DEFAULT_UNIFIED_SETTINGS.statsForNerdsEnabled
++      ? ["Stats for nerds"]
++      : []),
+     ...(settings.contextWindowMeterEnabled !== DEFAULT_UNIFIED_SETTINGS.contextWindowMeterEnabled
+       ? ["Context window indicator"]
+       : []),
+@@ -523,7 +527,9 @@ export function useSettingsRestore(onRestored?: () => void) {
+     ...(settings.enableAgentBrowserAccess !== DEFAULT_UNIFIED_SETTINGS.enableAgentBrowserAccess
+       ? ["Agent browser access"]
+       : []),
+-  ];
 +    ],
-+    [
-+      settings,
-+      theme,
-+      followSystem,
-+      themeHalves,
-+      isBackgroundActivityDirty,
-+      isTextGenerationModelDirty,
-+    ],
++    [settings, theme, followSystem, themeHalves, isBackgroundActivityDirty, isTextGenerationModelDirty],
 +  );
  
    const restoreDefaults = async () => {
      if (changedSettingLabels.length === 0) return;
-@@ -596,6 +614,7 @@ export function useSettingsRestore(onRestored?: () => void) {
+@@ -595,6 +601,7 @@ export function useSettingsRestore(onRestored?: () => void) {
        composerRichTextEnabled: DEFAULT_UNIFIED_SETTINGS.composerRichTextEnabled,
        sendShortcut: DEFAULT_UNIFIED_SETTINGS.sendShortcut,
        followUpBehavior: DEFAULT_UNIFIED_SETTINGS.followUpBehavior,
@@ -3455,10 +3201,10 @@ index adb29f1782..27e75e41bb 100644
        contextWindowMeterEnabled: DEFAULT_UNIFIED_SETTINGS.contextWindowMeterEnabled,
        environmentIdentificationMode: DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode,
        glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity,
-@@ -1430,6 +1449,32 @@ export function GeneralSettingsPanel() {
+@@ -1077,6 +1084,32 @@ export function ChatSettingsPanel() {
+             />
            }
          />
- 
 +        <SettingsRow
 +          {...searchableSetting("stats-for-nerds")}
 +          description="Show reported context, main-agent turn tokens, cache rate, and elapsed time below the composer. Available stats depend on the provider."
@@ -3489,17 +3235,17 @@ index adb29f1782..27e75e41bb 100644
            {...searchableSetting("send-shortcut")}
            description="Choose when Enter sends a prompt or inserts a new line"
 diff --git a/apps/web/src/components/settings/settingsSearch.ts b/apps/web/src/components/settings/settingsSearch.ts
-index 000ae5d474..6a39c3440a 100644
+index 5840566dc1..3919748801 100644
 --- a/apps/web/src/components/settings/settingsSearch.ts
 +++ b/apps/web/src/components/settings/settingsSearch.ts
-@@ -459,6 +459,12 @@ export const SETTINGS_SEARCH_ITEMS = [
-     to: "/settings/general",
+@@ -524,6 +524,12 @@ export const SETTINGS_SEARCH_ITEMS = [
+     to: "/settings/chat",
      searchTerms: ["composer rest resting scroll wheel conversation timeline shrink minimize"],
    },
 +  {
 +    id: "stats-for-nerds",
 +    title: "Stats for nerds",
-+    to: "/settings/general",
++    to: "/settings/chat",
 +    searchTerms: ["context tokens cache elapsed telemetry composer usage"],
 +  },
    {
@@ -3691,10 +3437,10 @@ index 2414d3cd01..0b45f85a12 100644
 +  });
 +});
 diff --git a/packages/contracts/src/orchestrationV2.ts b/packages/contracts/src/orchestrationV2.ts
-index b36fc971f8..62ad519407 100644
+index f4e8303972..897a25e1f0 100644
 --- a/packages/contracts/src/orchestrationV2.ts
 +++ b/packages/contracts/src/orchestrationV2.ts
-@@ -1056,6 +1056,16 @@ export const OrchestrationV2ProviderTurn = Schema.Struct({
+@@ -1090,6 +1090,16 @@ export const OrchestrationV2ProviderTurn = Schema.Struct({
    completedAt: Schema.NullOr(Schema.DateTimeUtc),
    tokenUsage: Schema.optional(OrchestrationV2ProviderTurnTokenUsage),
    turnTokenUsage: Schema.optional(TurnTokenUsage),
@@ -3712,7 +3458,7 @@ index b36fc971f8..62ad519407 100644
  export type OrchestrationV2ProviderTurn = typeof OrchestrationV2ProviderTurn.Type;
  
 diff --git a/packages/contracts/src/settings.ts b/packages/contracts/src/settings.ts
-index e47ea801f3..6336ad08d0 100644
+index 649e0e0ab0..c103754270 100644
 --- a/packages/contracts/src/settings.ts
 +++ b/packages/contracts/src/settings.ts
 @@ -425,6 +425,9 @@ export const ClientSettingsSchema = Schema.Struct({
@@ -3725,7 +3471,7 @@ index e47ea801f3..6336ad08d0 100644
    composerCollapseOnScroll: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
    composerRichTextEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
    sendShortcut: Schema.Literals(["enter", "mod-enter-multiline", "mod-enter"]).pipe(
-@@ -1655,6 +1658,7 @@ export const ClientSettingsPatch = Schema.Struct({
+@@ -1653,6 +1656,7 @@ export const ClientSettingsPatch = Schema.Struct({
    pullRequestLinksOpenInApp: Schema.optionalKey(Schema.Boolean),
    planModeEnabled: Schema.optionalKey(Schema.Boolean),
    contextWindowMeterEnabled: Schema.optionalKey(Schema.Boolean),

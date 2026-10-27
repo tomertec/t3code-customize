@@ -5,7 +5,7 @@ Subject: [PATCH 2/9] Usage limits: background polling, reset-aware merging and
  fetch-time ordering
 
 ---
- .../provider/ClaudeCapabilitiesProbe.test.ts  | 373 +++++++++++-
+ .../provider/ClaudeCapabilitiesProbe.test.ts  | 370 +++++++++++-
  apps/server/src/provider/ClaudeProvider.ts    |  27 +-
  apps/server/src/provider/CodexProvider.ts     |  24 +-
  .../src/provider/Drivers/ClaudeDriver.ts      |  13 +-
@@ -26,15 +26,17 @@ Subject: [PATCH 2/9] Usage limits: background polling, reset-aware merging and
  .../provider-cursor/src/server/usageLimits.ts |   1 +
  .../provider-grok/src/server/usageLimits.ts   |   1 +
  .../src/server/usageLimits.ts                 |   3 +
- 21 files changed, 2266 insertions(+), 107 deletions(-)
+ 21 files changed, 2260 insertions(+), 110 deletions(-)
  create mode 100644 apps/server/src/provider/testing/ClaudeCapabilitiesProbe.fixture.mjs
 
 diff --git a/apps/server/src/provider/ClaudeCapabilitiesProbe.test.ts b/apps/server/src/provider/ClaudeCapabilitiesProbe.test.ts
-index 80740b0a21..364febf37f 100644
+index c03916564e..ffaf3f24dd 100644
 --- a/apps/server/src/provider/ClaudeCapabilitiesProbe.test.ts
 +++ b/apps/server/src/provider/ClaudeCapabilitiesProbe.test.ts
-@@ -1,11 +1,37 @@
+@@ -1,19 +1,36 @@
  // @effect-diagnostics nodeBuiltinImport:off - cleanup uses Node's retrying rm, which the FileSystem service does not expose.
+-import * as NodeServices from "@effect/platform-node/NodeServices";
+-import { ClaudeSettings, type ServerProvider } from "@t3tools/contracts";
 +import * as ClaudeSdk from "@anthropic-ai/claude-agent-sdk";
  import { vi } from "vite-plus/test";
 +import * as Deferred from "effect/Deferred";
@@ -51,31 +53,39 @@ index 80740b0a21..364febf37f 100644
 +import * as NodeServices from "@effect/platform-node/NodeServices";
  import { assert, it } from "@effect/vitest";
 +import * as Cause from "effect/Cause";
-+import * as Effect from "effect/Effect";
+ import * as Effect from "effect/Effect";
 +import * as FileSystem from "effect/FileSystem";
 +import * as Path from "effect/Path";
-+import * as Schema from "effect/Schema";
+ import * as Schema from "effect/Schema";
 +import * as Result from "effect/Result";
  
--import { buildClaudeCapabilitiesProbeQueryOptions } from "./ClaudeProvider.ts";
-+import {
-+  buildClaudeCapabilitiesProbeQueryOptions,
+ import {
+   buildClaudeCapabilitiesProbeQueryOptions,
 +  probeClaudeCapabilities,
-+  probeClaudeWorkspaceSnapshot,
-+} from "./ClaudeProvider.ts";
+   probeClaudeWorkspaceSnapshot,
+ } from "./ClaudeProvider.ts";
 +import { COMPACT_SLASH_COMMAND } from "@t3tools/provider-core/server/snapshotProbe";
  
  vi.mock("@anthropic-ai/claude-agent-sdk", { spy: true });
  
+-const decodeClaudeSettings = Schema.decodeEffect(ClaudeSettings);
 +const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
-+
+ 
  it("drops strict MCP mode, and only that, next to an administrator's managed-mcp.json", () => {
    const options = buildClaudeCapabilitiesProbeQueryOptions({
-     executablePath: "/usr/bin/claude",
-@@ -20,3 +46,348 @@ it("drops strict MCP mode, and only that, next to an administrator's managed-mcp
-   assert.deepEqual(options.mcpServers, {});
-   assert.equal(options.env?.ENABLE_CLAUDEAI_MCP_SERVERS, "false");
- });
+@@ -33,7 +50,7 @@ it("drops strict MCP mode, and only that, next to an administrator's managed-mcp
+ it.effect("reports a deleted worktree's scan as finished, not pending", () =>
+   Effect.gen(function* () {
+     const snapshot = yield* probeClaudeWorkspaceSnapshot(
+-      yield* decodeClaudeSettings({}),
++      decodeClaudeSettings({}),
+       { skills: [], slashCommands: [] } as unknown as ServerProvider,
+       "/nonexistent/t3-deleted-worktree",
+       { HOME: "/nonexistent/t3-home" },
+@@ -41,3 +58,348 @@ it.effect("reports a deleted worktree's scan as finished, not pending", () =>
+     assert.strictEqual(snapshot.slashCommandsPending, false);
+   }).pipe(Effect.provide(NodeServices.layer)),
+ );
 +
 +it.layer(NodeServices.layer)("Claude capability probe SDK boundary", (it) => {
 +  it.effect(
@@ -422,10 +432,10 @@ index 80740b0a21..364febf37f 100644
 +  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 +);
 diff --git a/apps/server/src/provider/ClaudeProvider.ts b/apps/server/src/provider/ClaudeProvider.ts
-index 4c6a86dbc3..751897a300 100644
+index 5bc82a41d4..030fb26fe7 100644
 --- a/apps/server/src/provider/ClaudeProvider.ts
 +++ b/apps/server/src/provider/ClaudeProvider.ts
-@@ -626,21 +626,18 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
+@@ -630,21 +630,18 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
      claudeAuthMetadata({
        subscriptionType: capabilities.subscriptionType,
        authMethod: capabilities.tokenSource,
@@ -460,7 +470,7 @@ index 4c6a86dbc3..751897a300 100644
      resolveResetCredits &&
      capabilities.subscriptionType &&
 diff --git a/apps/server/src/provider/CodexProvider.ts b/apps/server/src/provider/CodexProvider.ts
-index 25de2e9ffe..4604a977a7 100644
+index 8458315f64..c8032df902 100644
 --- a/apps/server/src/provider/CodexProvider.ts
 +++ b/apps/server/src/provider/CodexProvider.ts
 @@ -56,6 +56,7 @@ const RATE_LIMITS_PROBE_TIMEOUT_MS = 3_000;
@@ -471,7 +481,7 @@ index 25de2e9ffe..4604a977a7 100644
        readonly snapshot: CodexRateLimitSnapshot;
        readonly rateLimitsByLimitId?:
          | Readonly<Record<string, CodexRateLimitSnapshot>>
-@@ -562,15 +563,18 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
+@@ -563,15 +564,18 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
              deadlineMs,
              RATE_LIMITS_PROBE_TIMEOUT_MS,
            ).pipe(
@@ -499,7 +509,7 @@ index 25de2e9ffe..4604a977a7 100644
              ),
              Effect.catch((error) =>
                Effect.logDebug("Codex rate-limit read failed.", { cause: error }).pipe(
-@@ -793,7 +797,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
+@@ -794,7 +798,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
              snapshot: snapshot.rateLimits.snapshot,
              rateLimitsByLimitId: snapshot.rateLimits.rateLimitsByLimitId,
              resetCredits: snapshot.rateLimits.resetCredits,

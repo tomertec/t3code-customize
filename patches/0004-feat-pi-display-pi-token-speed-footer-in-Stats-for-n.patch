@@ -23,7 +23,7 @@ Subject: [PATCH 4/9] feat(pi): display pi-token-speed footer in Stats for
  create mode 100644 packages/provider-pi/src/server/tokenSpeed.ts
 
 diff --git a/apps/server/src/orchestration-v2/ProjectionStore.test.ts b/apps/server/src/orchestration-v2/ProjectionStore.test.ts
-index e56d97ae7a..26b17e6090 100644
+index 3a16b56d48..c8eaab5def 100644
 --- a/apps/server/src/orchestration-v2/ProjectionStore.test.ts
 +++ b/apps/server/src/orchestration-v2/ProjectionStore.test.ts
 @@ -1486,7 +1486,12 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
@@ -65,7 +65,7 @@ index e56d97ae7a..26b17e6090 100644
        assert.deepEqual(replaced.providerTurns[0]?.responseThroughput, {
          ...throughput,
 diff --git a/apps/server/src/orchestration-v2/ProjectionStore.ts b/apps/server/src/orchestration-v2/ProjectionStore.ts
-index 627c5fb724..8ad04f8c96 100644
+index 452d651b6f..53d778571f 100644
 --- a/apps/server/src/orchestration-v2/ProjectionStore.ts
 +++ b/apps/server/src/orchestration-v2/ProjectionStore.ts
 @@ -751,6 +751,16 @@ function upsertProviderTurn(
@@ -85,7 +85,7 @@ index 627c5fb724..8ad04f8c96 100644
      ...((next.responseThroughput ?? current?.responseThroughput) === undefined
        ? {}
        : { responseThroughput: next.responseThroughput ?? current?.responseThroughput }),
-@@ -2447,7 +2457,9 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
+@@ -2451,7 +2461,9 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
              }
              case "provider-turn.updated": {
                const existingRows =
@@ -280,10 +280,10 @@ index 0b45f85a12..d9b60b363f 100644
      const responseThroughput = {
        outputTokens: 400,
 diff --git a/packages/contracts/src/orchestrationV2.ts b/packages/contracts/src/orchestrationV2.ts
-index 62ad519407..914c88b028 100644
+index 897a25e1f0..caac49024d 100644
 --- a/packages/contracts/src/orchestrationV2.ts
 +++ b/packages/contracts/src/orchestrationV2.ts
-@@ -1056,6 +1056,15 @@ export const OrchestrationV2ProviderTurn = Schema.Struct({
+@@ -1090,6 +1090,15 @@ export const OrchestrationV2ProviderTurn = Schema.Struct({
    completedAt: Schema.NullOr(Schema.DateTimeUtc),
    tokenUsage: Schema.optional(OrchestrationV2ProviderTurnTokenUsage),
    turnTokenUsage: Schema.optional(TurnTokenUsage),
@@ -300,13 +300,13 @@ index 62ad519407..914c88b028 100644
    responseThroughput: Schema.optional(
      Schema.Struct({
 diff --git a/packages/provider-pi/src/server/adapter.test.ts b/packages/provider-pi/src/server/adapter.test.ts
-index f90ebbaba1..fd6206bd67 100644
+index 544ac5cce6..f76e4e7452 100644
 --- a/packages/provider-pi/src/server/adapter.test.ts
 +++ b/packages/provider-pi/src/server/adapter.test.ts
-@@ -518,6 +518,85 @@ const startTurn = Effect.fnUntraced(function* (
- });
+@@ -606,6 +606,85 @@ describe("PiAdapterV2", () => {
+     }).pipe(Effect.scoped, Effect.provide(layerTest)),
+   );
  
- describe("PiAdapterV2", () => {
 +  it.effect.each([false, true])(
 +    "retains newest or cleared tokenSpeed reading at settlement, clear=%s",
 +    (clear) =>
@@ -390,7 +390,7 @@ index f90ebbaba1..fd6206bd67 100644
      "completes a resumed user turn before native wake events arrive, Pi streaming=%s",
      (streaming) =>
 diff --git a/packages/provider-pi/src/server/adapter.ts b/packages/provider-pi/src/server/adapter.ts
-index 38b6681ec2..eca384751a 100644
+index aca13e3564..0e07a580e4 100644
 --- a/packages/provider-pi/src/server/adapter.ts
 +++ b/packages/provider-pi/src/server/adapter.ts
 @@ -1,3 +1,28 @@
@@ -422,7 +422,7 @@ index 38b6681ec2..eca384751a 100644
  import * as HostProcess from "@t3tools/shared/HostProcess";
  import { AgentScope } from "@t3tools/shared/AgentScope";
  import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
-@@ -24,6 +49,7 @@ import {
+@@ -23,6 +48,7 @@ import {
    type OrchestrationV2ProviderTurnTokenUsage,
  } from "@t3tools/contracts";
  import { PiSettings } from "../settings.ts";
@@ -430,7 +430,7 @@ index 38b6681ec2..eca384751a 100644
  import * as Cause from "effect/Cause";
  import * as DateTime from "effect/DateTime";
  import * as Deferred from "effect/Deferred";
-@@ -348,6 +374,8 @@ interface ActivePiTurn {
+@@ -346,6 +372,8 @@ interface ActivePiTurn {
    readonly turnInput: ProviderAdapter.ProviderAdapterV2TurnInput;
    readonly providerTurn: OrchestrationV2ProviderTurn;
    readonly startedAt: DateTime.Utc;
@@ -439,7 +439,7 @@ index 38b6681ec2..eca384751a 100644
    readonly itemOrdinals: Map<string, number>;
    nextItemOrdinal: number;
    messageOrdinal: number;
-@@ -1214,6 +1242,30 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
+@@ -1216,6 +1244,30 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
          const method = recordString(event, "method");
          const nativeRequestId = recordString(event, "id");
          if (method === undefined) return;
@@ -470,7 +470,7 @@ index 38b6681ec2..eca384751a 100644
          if (method === "notify") {
            const state = threadState;
            const turn = state?.activeTurn ?? null;
-@@ -1497,6 +1549,9 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
+@@ -1499,6 +1551,9 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
              status: interrupted ? "interrupted" : failure !== null ? "failed" : "completed",
              completedAt,
              ...(tokenUsage === undefined ? {} : { tokenUsage }),
