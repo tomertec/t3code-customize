@@ -9,7 +9,7 @@ Subject: [PATCH 2/9] Usage limits: background polling, reset-aware merging and
  apps/server/src/provider/ClaudeProvider.ts    |  27 +-
  apps/server/src/provider/CodexProvider.ts     |  24 +-
  .../src/provider/Drivers/ClaudeDriver.ts      |  13 +-
- .../src/provider/Drivers/CodexDriver.ts       |  27 +-
+ .../src/provider/Drivers/CodexDriver.ts       |  26 +-
  .../src/provider/claudeResetCredits.test.ts   | 570 ++++++++++++++++++
  .../server/src/provider/claudeResetCredits.ts | 154 +++++
  .../src/provider/claudeUsageLimits.test.ts    | 177 +++++-
@@ -26,7 +26,7 @@ Subject: [PATCH 2/9] Usage limits: background polling, reset-aware merging and
  .../provider-cursor/src/server/usageLimits.ts |   1 +
  .../provider-grok/src/server/usageLimits.ts   |   1 +
  .../src/server/usageLimits.ts                 |   3 +
- 21 files changed, 2260 insertions(+), 110 deletions(-)
+ 21 files changed, 2259 insertions(+), 110 deletions(-)
  create mode 100644 apps/server/src/provider/testing/ClaudeCapabilitiesProbe.fixture.mjs
 
 diff --git a/apps/server/src/provider/ClaudeCapabilitiesProbe.test.ts b/apps/server/src/provider/ClaudeCapabilitiesProbe.test.ts
@@ -519,7 +519,7 @@ index 8458315f64..c8032df902 100644
  
    return buildServerProvider({
 diff --git a/apps/server/src/provider/Drivers/ClaudeDriver.ts b/apps/server/src/provider/Drivers/ClaudeDriver.ts
-index 86832d53d3..188cecc7bc 100644
+index 86832d53d3..3f29e65af6 100644
 --- a/apps/server/src/provider/Drivers/ClaudeDriver.ts
 +++ b/apps/server/src/provider/Drivers/ClaudeDriver.ts
 @@ -170,6 +170,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
@@ -552,12 +552,12 @@ index 86832d53d3..188cecc7bc 100644
          ),
        checkProvider,
 +      checkUsageLimits: (snapshot) =>
-+        snapshot.version ? readUsageLimits(snapshot.version) : Effect.succeed(undefined),
++        snapshot.version ? readUsageLimits(snapshot.version) : Effect.void,
        enrichSnapshot: ({ settings, snapshot, publishSnapshot }) =>
          resolveMaintenance().pipe(
            Effect.flatMap((maintenanceCapabilities) =>
 diff --git a/apps/server/src/provider/Drivers/CodexDriver.ts b/apps/server/src/provider/Drivers/CodexDriver.ts
-index 2d078cf325..b1811d00fb 100644
+index 2d078cf325..8945f006e7 100644
 --- a/apps/server/src/provider/Drivers/CodexDriver.ts
 +++ b/apps/server/src/provider/Drivers/CodexDriver.ts
 @@ -1,4 +1,8 @@
@@ -597,12 +597,11 @@ index 2d078cf325..b1811d00fb 100644
      ).pipe(
        Effect.mapError(
          (cause) =>
-@@ -225,6 +240,14 @@ export const CodexDriver: ProviderDriver<
+@@ -225,6 +240,13 @@ export const CodexDriver: ProviderDriver<
            (draft, catalog) => stampIdentity(applyCodexModelCatalog(draft, catalog)),
          ),
        checkProvider,
-+      checkUsageLimits: () =>
-+        Effect.gen(function* () {
++      checkUsageLimits: Effect.fn("checkUsageLimits")(function* () {
 +          for (const reader of usageLimitsReaders) {
 +            const limits = yield* reader;
 +            if (limits) return limits;
