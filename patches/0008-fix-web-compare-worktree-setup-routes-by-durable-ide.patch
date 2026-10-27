@@ -5,17 +5,17 @@ Subject: [PATCH 8/9] fix(web): compare worktree setup routes by durable
  identity
 
 ---
- .../chat/useWorktreeSetup.browser.test.tsx    | 43 +++++++++++++++++++
+ .../chat/useWorktreeSetup.browser.test.tsx    | 44 +++++++++++++++++++
  .../src/components/chat/useWorktreeSetup.ts   |  6 ++-
- 2 files changed, 47 insertions(+), 2 deletions(-)
+ 2 files changed, 48 insertions(+), 2 deletions(-)
  create mode 100644 apps/web/src/components/chat/useWorktreeSetup.browser.test.tsx
 
 diff --git a/apps/web/src/components/chat/useWorktreeSetup.browser.test.tsx b/apps/web/src/components/chat/useWorktreeSetup.browser.test.tsx
 new file mode 100644
-index 0000000000..017a7078e8
+index 0000000000..08f81511db
 --- /dev/null
 +++ b/apps/web/src/components/chat/useWorktreeSetup.browser.test.tsx
-@@ -0,0 +1,43 @@
+@@ -0,0 +1,44 @@
 +import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 +import { act, useState } from "react";
 +import { createRoot, type Root } from "react-dom/client";
@@ -31,6 +31,7 @@ index 0000000000..017a7078e8
 +}));
 +vi.mock("../../state/vcs", () => ({ vcsEnvironment: { cancelWorktreeSetup: {}, worktreeSetup: vi.fn() } }));
 +vi.mock("../../terminalUiStateStore", () => ({ useTerminalUiStateStore: () => vi.fn() }));
++vi.mock("../../lib/terminalFocus", () => ({ focusTerminal: vi.fn() }));
 +
 +let renderer: Root | null = null;
 +let container: HTMLDivElement;
