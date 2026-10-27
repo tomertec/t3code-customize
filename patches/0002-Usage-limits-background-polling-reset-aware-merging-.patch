@@ -8,7 +8,7 @@ Subject: [PATCH 2/9] Usage limits: background polling, reset-aware merging and
  .../provider/ClaudeCapabilitiesProbe.test.ts  | 370 +++++++++++-
  apps/server/src/provider/ClaudeProvider.ts    |  27 +-
  apps/server/src/provider/CodexProvider.ts     |  24 +-
- .../src/provider/Drivers/ClaudeDriver.ts      |  13 +-
+ .../src/provider/Drivers/ClaudeDriver.ts      |  16 +-
  .../src/provider/Drivers/CodexDriver.ts       |  26 +-
  .../src/provider/claudeResetCredits.test.ts   | 570 ++++++++++++++++++
  .../server/src/provider/claudeResetCredits.ts | 154 +++++
@@ -26,7 +26,7 @@ Subject: [PATCH 2/9] Usage limits: background polling, reset-aware merging and
  .../provider-cursor/src/server/usageLimits.ts |   1 +
  .../provider-grok/src/server/usageLimits.ts   |   1 +
  .../src/server/usageLimits.ts                 |   3 +
- 21 files changed, 2259 insertions(+), 110 deletions(-)
+ 21 files changed, 2261 insertions(+), 111 deletions(-)
  create mode 100644 apps/server/src/provider/testing/ClaudeCapabilitiesProbe.fixture.mjs
 
 diff --git a/apps/server/src/provider/ClaudeCapabilitiesProbe.test.ts b/apps/server/src/provider/ClaudeCapabilitiesProbe.test.ts
@@ -519,9 +519,15 @@ index 8458315f64..c8032df902 100644
  
    return buildServerProvider({
 diff --git a/apps/server/src/provider/Drivers/ClaudeDriver.ts b/apps/server/src/provider/Drivers/ClaudeDriver.ts
-index 86832d53d3..3f29e65af6 100644
+index 86832d53d3..ddbee4631a 100644
 --- a/apps/server/src/provider/Drivers/ClaudeDriver.ts
 +++ b/apps/server/src/provider/Drivers/ClaudeDriver.ts
+@@ -1,4 +1,4 @@
+-import { ClaudeSettings, ProviderDriverKind } from "@t3tools/contracts";
++import { ClaudeSettings, ProviderDriverKind, type ServerProvider } from "@t3tools/contracts";
+ import * as Cache from "effect/Cache";
+ import * as Duration from "effect/Duration";
+ import * as Crypto from "effect/Crypto";
 @@ -170,6 +170,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
      });
  
@@ -547,12 +553,13 @@ index 86832d53d3..3f29e65af6 100644
              ),
            ),
            Effect.tap((provider) =>
-@@ -299,6 +300,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
+@@ -299,6 +300,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
            Effect.map(stampIdentity),
          ),
        checkProvider,
-+      checkUsageLimits: (snapshot) =>
-+        snapshot.version ? readUsageLimits(snapshot.version) : Effect.void,
++      checkUsageLimits: Effect.fn("checkUsageLimits")(function* (snapshot: ServerProvider) {
++        if (snapshot.version) return yield* readUsageLimits(snapshot.version);
++      }),
        enrichSnapshot: ({ settings, snapshot, publishSnapshot }) =>
          resolveMaintenance().pipe(
            Effect.flatMap((maintenanceCapabilities) =>
